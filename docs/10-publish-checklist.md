@@ -100,3 +100,5 @@ git tag -a v0.1.0 -m "dsh-lark-bridge 0.1.0" && git push origin v0.1.0
 | 0.1.0 | 2026-08-14 | 手动 `npm publish --registry=https://registry.npmjs.org/`（账号 `leo-lab-2026`） | registry 名干净安装彩排通过；`publish.yml` 对已发布版本幂等跳过，推 `v0.1.0` tag 仅创建 GitHub Release |
 
 CI 注意事项：两个 workflow 都**钉住**了 harness 提交（`47f943859b`，发布时的公开 master HEAD）。本地 `../deepseek-harness` checkout 升级后，需同步 bump 两处 `ref:` 并重跑本地门禁。
+
+**OIDC 硬性要求（踩过的坑）**：publish workflow 必须跑 **Node 24**（自带 npm ≥ 11.5.1，OIDC 才生效；Node 22 自带 npm 10，会退回 token 认证并 404）；且 `actions/setup-node` **不要配置 `registry-url`**——无真实 `NODE_AUTH_TOKEN` 时 setup-node 会写入占位 token，令 OIDC 失效、发布 404。

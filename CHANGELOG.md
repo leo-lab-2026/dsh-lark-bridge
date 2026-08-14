@@ -7,7 +7,7 @@ While the major version is `0`, breaking changes may land in minor releases.
 
 ## [Unreleased]
 
-## [0.1.1-beta.0] - 2026-08-14
+## [0.1.1-beta.1] - 2026-08-14
 
 ### Changed
 - Release pipeline only: npm trusted publishing (GitHub OIDC + SLSA
@@ -36,6 +36,6 @@ While the major version is `0`, breaking changes may land in minor releases.
 - Added npm publish metadata (`keywords`, `repository`, `publishConfig`,
   `packageManager`), LICENSE, and release gates (`prepublishOnly`).
 
-[Unreleased]: https://github.com/leo-lab-2026/dsh-lark-bridge/compare/v0.1.1-beta.0...main
-[0.1.1-beta.0]: https://github.com/leo-lab-2026/dsh-lark-bridge/releases/tag/v0.1.1-beta.0
+[Unreleased]: https://github.com/leo-lab-2026/dsh-lark-bridge/compare/v0.1.1-beta.1...main
+[0.1.1-beta.1]: https://github.com/leo-lab-2026/dsh-lark-bridge/releases/tag/v0.1.1-beta.1
 [0.1.0]: https://github.com/leo-lab-2026/dsh-lark-bridge/releases/tag/v0.1.0

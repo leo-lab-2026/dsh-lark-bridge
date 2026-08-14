@@ -43,12 +43,16 @@ jobs:
         with:
           version: 11.7.0
 
+      # Node 24 is required: npm trusted publishing (OIDC) needs npm ≥ 11.5.1,
+      # and only Node 24+ bundles npm 11. Node 22 bundles npm 10, which falls
+      # back to token auth (setup-node's dummy sentinel token) and 404s.
+      # No registry-url here: with no real NODE_AUTH_TOKEN, setup-node writes a
+      # placeholder auth token that defeats the OIDC flow.
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
           cache-dependency-path: deepseek-harness/pnpm-lock.yaml
-          registry-url: https://registry.npmjs.org/
 
       - name: Install and build the harness checkout
         run: |
@@ -80,7 +84,7 @@ jobs:
             *-beta.*|*-rc.*|*-pre.*|*-dev.*) tag="--tag next" ;;
             *) tag="" ;;
           esac
-          npm publish --registry=https://registry.npmjs.org/ --access public --provenance $tag --loglevel verbose
+          npm publish --registry=https://registry.npmjs.org/ --access public --provenance $tag
 
       - name: Pack tarball for the release asset
         run: pnpm pack --pack-destination dist
