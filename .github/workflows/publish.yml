@@ -80,7 +80,7 @@ jobs:
             *-beta.*|*-rc.*|*-pre.*|*-dev.*) tag="--tag next" ;;
             *) tag="" ;;
           esac
-          npm publish --registry=https://registry.npmjs.org/ --access public --provenance $tag
+          npm publish --registry=https://registry.npmjs.org/ --access public --provenance $tag --loglevel verbose
 
       - name: Pack tarball for the release asset
         run: pnpm pack --pack-destination dist
