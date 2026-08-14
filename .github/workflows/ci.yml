@@ -14,9 +14,14 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
+      # Pinned to the harness commit this plugin was developed and tested
+      # against (public master HEAD at release time). Bump it together with
+      # the local `../deepseek-harness` checkout when developing against a
+      # newer harness, then re-verify the full gate locally.
       - uses: actions/checkout@v4
         with:
           repository: deepseek-ai/deepseek-harness
+          ref: 47f943859bef60e4160492346772ded9b24f765a
           path: deepseek-harness
 
       - uses: actions/checkout@v4
@@ -24,6 +29,8 @@ jobs:
           path: dsh-lark-bridge
 
       - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
 
       - uses: actions/setup-node@v4
         with:
