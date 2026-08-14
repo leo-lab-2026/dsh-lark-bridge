@@ -1,0 +1,13 @@
+# dsh-lark-bridge bundle patch: applied when a profile lists `dsh-lark-bridge`
+# among its bundles. Users override this row by `id` in their own
+# profile `cordis.patch.yml` (patch replaces the whole `config`, not merge).
+#
+# Every tunable ships with a neutral default here; the schema in `src/config.ts`
+# owns validation and fills the rest. Without a notification target the plugin
+# is a safe no-op that only warns (fail-soft, easy to debug).
+
+- insert:
+    - id: dsh-lark-notify
+      name: 'dsh-lark-bridge'
+      config:
+        dryRun: false

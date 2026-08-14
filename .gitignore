@@ -1,0 +1,35 @@
+# ---- Dependencies ----
+node_modules/
+.pnpm-store/
+
+# ---- Build output ----
+lib/
+*.tgz
+
+# ---- Tests ----
+coverage/
+.vitest/
+
+# ---- Logs ----
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ---- Environment / secrets ----
+.env
+.env.*
+!.env.example
+
+# ---- Editors / IDEs ----
+.idea/
+.vscode/
+*.swp
+
+# ---- OS files ----
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# ---- DSH runtime dirs (local only) ----
+.xdg/
+.devhome/
