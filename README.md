@@ -1,5 +1,9 @@
 # dsh-lark-bridge
 
+[![npm version](https://img.shields.io/npm/v/dsh-lark-bridge?style=flat-square&label=npm)](https://www.npmjs.com/package/dsh-lark-bridge)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-lark-bridge?style=flat-square)](https://www.npmjs.com/package/dsh-lark-bridge)
+[![license](https://img.shields.io/npm/l/dsh-lark-bridge?style=flat-square)](./LICENSE)
+
 DeepSeek Harness 插件：当 DSH 会话因**等待使用者交互**而停顿时，实时调用 [lark-cli](https://github.com/larksuite/cli) 发送飞书/Lark 通知，提醒你回到 DSH 继续处理。
 
 ## 功能
@@ -29,6 +33,8 @@ dsh plugin --profile <name> add link:/path/to/dsh-lark-bridge
 ```
 
 验证安装：`dsh --profile <name> --dump-config` 应出现 `dsh-lark-notify` 行。重启 `dsh` 生效。
+
+> **默认无通知目标**：插件安装后的目标为空（不携带任何聊天/用户 id——那是属于你的个人数据）。首次使用时通过下面的「方式 A（`/lark-notify setup`）」或「方式 B（设置面板）」指定一次，写入 `settings.yaml` 持久生效；之后换机器/换会话重新指定即可。
 
 ## 首次配置（三步，约 5 分钟）
 
@@ -95,10 +101,12 @@ lark-cli event consume im.message.receive_v1 --max-events 1 --timeout 60s
 
 ## 发布与安装说明（维护者）
 
-- **npm 发布**：`pnpm build && pnpm publish`——包内含预构建的 `lib/`，用户安装时不会执行构建；
+完整发布方案（发布渠道决策、发布前门禁、npmjs 发布流程、dist-tag 政策、回滚预案、CI 自动化）见 [docs/10-publish-checklist.md](./docs/10-publish-checklist.md)。要点：
+
+- **npm 发布**：`pnpm build && npm publish --registry=https://registry.npmjs.org/`（`prepublishOnly` 自动跑 typecheck+test，`prepack` 自动构建 `lib/`）；用户安装时不会执行构建；
 - **GitHub 源码安装**：`prepare` 脚本负责转译；用户需按 pnpm 提示在 profile 的 `pnpm-workspace.yaml` 中授权 `allowBuilds`（参见 DSH 官方插件分发文档）；
 - **锁定 lark-cli 版本**：输出/错误契约随 lark-cli 迭代，README 建议用户锁定 `@larksuite/cli` 版本；
-- **本地开发**：devDependencies 通过 `link:` 指向同机的 `deepseek-harness` checkout（需位于 `../deepseek-harness` 且已构建）；`pnpm test`（88 用例，含真实子进程 fixture）、`pnpm typecheck`、`pnpm build`。
+- **本地开发**：devDependencies 通过 `link:` 指向同机的 `deepseek-harness` checkout（需位于 `../deepseek-harness` 且已构建）；`pnpm test`（含真实子进程 fixture）、`pnpm typecheck`、`pnpm build`。
 
 ## 开发
 

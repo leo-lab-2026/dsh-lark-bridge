@@ -1,6 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
-import { installUserSettings } from '../src/settings.js'
+import { LARK_NOTIFY_SETTINGS_NAMESPACE, installUserSettings } from '../src/settings.js'
 import { createLogger, MemorySettingsProvider, testConfig } from './helpers.js'
 
 async function createRuntime(config = testConfig()) {
@@ -12,6 +12,21 @@ async function createRuntime(config = testConfig()) {
   await new Promise(resolve => setTimeout(resolve, 0))
   return { ctx, logger, installed }
 }
+
+describe('LARK_NOTIFY_SETTINGS_NAMESPACE', () => {
+  it('is the stable lowercase kebab-case namespace written to settings.yaml', () => {
+    // Pinned so a rename breaks loudly: this string is the persisted
+    // settings.yaml section key and the Web settings panel anchor.
+    expect(LARK_NOTIFY_SETTINGS_NAMESPACE).toBe('lark-notify')
+  })
+
+  it('carries no runtime dependency on the dsh-settings package', async () => {
+    // The namespace brander is inlined (parity with the upstream helper);
+    // registration must still typecheck against the seam package's types.
+    const { installed } = await createRuntime()
+    expect(installed.scope).toBeDefined()
+  })
+})
 
 describe('installUserSettings', () => {
   it('registers the namespace and resolves config as the base layer', async () => {

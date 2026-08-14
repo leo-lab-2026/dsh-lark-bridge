@@ -1,0 +1,98 @@
+# Continuous integration: full quality gate plus a consumer smoke test.
+#
+# The plugin's devDependencies are `link:` anchors to a sibling
+# deepseek-harness checkout (see package.json), so CI checks out both
+# repositories side by side — same layout as local development.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          path: deepseek-harness
+
+      - uses: actions/checkout@v4
+        with:
+          path: dsh-lark-bridge
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: deepseek-harness/pnpm-lock.yaml
+
+      - name: Install and build the harness checkout
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build
+        working-directory: deepseek-harness
+
+      - name: Install plugin dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: dsh-lark-bridge
+
+      - name: Typecheck
+        run: pnpm typecheck
+        working-directory: dsh-lark-bridge
+
+      - name: Test
+        run: pnpm test
+        working-directory: dsh-lark-bridge
+
+      - name: Build
+        run: pnpm build
+        working-directory: dsh-lark-bridge
+
+      - name: Pack the publish tarball
+        run: pnpm pack --pack-destination dist
+        working-directory: dsh-lark-bridge
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-lark-bridge-tarball
+          path: dsh-lark-bridge/dist/*.tgz
+
+  consumer-smoke:
+    # Simulates a real end user: installs the packed tarball into an empty
+    # project with ONLY its declared runtime dependencies (no `link:` dev
+    # dependencies, no harness checkout) and loads the entry point. Guards
+    # against shipping undeclared runtime imports.
+    runs-on: ubuntu-latest
+    needs: gate
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download tarball artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dsh-lark-bridge-tarball
+          path: artifact
+
+      - name: Install tarball with published dependencies only
+        run: |
+          mkdir smoke && cd smoke
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund ../artifact/dsh-lark-bridge-*.tgz @deepseek-ai/schemastery
+
+      - name: Load the published entry point
+        run: |
+          cd smoke
+          node --input-type=module -e "
+            const m = await import('dsh-lark-bridge')
+            if (m.name !== 'dsh-lark-notify') throw new Error('unexpected plugin name: ' + m.name)
+            if (typeof m.apply !== 'function') throw new Error('missing apply export')
+            console.log('consumer smoke ok:', m.name)
+          "

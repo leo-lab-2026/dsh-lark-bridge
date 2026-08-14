@@ -3,8 +3,10 @@
 # profile `cordis.patch.yml` (patch replaces the whole `config`, not merge).
 #
 # Every tunable ships with a neutral default here; the schema in `src/config.ts`
-# owns validation and fills the rest. Without a notification target the plugin
-# is a safe no-op that only warns (fail-soft, easy to debug).
+# owns validation and fills the rest. The notification target SHIPS EMPTY —
+# it is per-user data set once via `/lark-notify setup` or the DSH settings
+# panel ("lark-notify" section) and persisted in settings.yaml. Without a
+# target the plugin is a safe no-op that only warns (fail-soft, easy to debug).
 
 - insert:
     - id: dsh-lark-notify

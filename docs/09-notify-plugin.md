@@ -85,7 +85,7 @@ LarkCliTransport ─▶ 串行队列 ─▶ spawn lark-cli（成功信封 ok=tru
 
 ## 4. 配置（三层：settings 用户层 > cordis.yml 部署层 > 默认值）
 
-面向公众发布后，通知目标的配置走 **DSH settings 命名空间** `lark-notify`（用户层）：
+面向公众发布后，通知目标的配置走 **DSH settings 命名空间** `lark-notify`（用户层）。**默认契约：插件安装后通知目标为空**——chat_id/open_id 属于用户个人数据，不随插件携带、也不应硬编码进部署配置；首次使用由 `/lark-notify setup` 或设置面板指定一次，写入 `settings.yaml` 持久生效，cordis.yml 的 `config.target` 仅作 CI/批量部署的可选默认值。
 - 插件注册 `lark-notify` 命名空间（schema：`chatId`/`userId`/`dryRun`），DSH Web 设置面板自动渲染表单；写入持久化到 `$DSH_HOME/settings.yaml`；
 - 解析顺序：schema 默认 → cordis.yml `config` 作为 `base`（部署默认值，CI/高级用户）→ 用户层（设置面板 / `/lark-notify setup` 写入）；
 - `applies: 'live'`：watch 每次变更即时重解析，transport 逐次发送读取最新 target/dryRun —— 改设置无需重启；

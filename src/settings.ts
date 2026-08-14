@@ -12,11 +12,25 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type {} from '@deepseek-ai/dsh-settings'
-import { settingsNamespace, type SettingsScope } from '@deepseek-ai/dsh-settings'
+import type { SettingsNamespace, SettingsScope } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 import type { Config } from './config.js'
 import type { PluginLogger } from './logger.js'
+
+// Parity copy of the upstream `settingsNamespace()` helper
+// (@deepseek-ai/dsh-settings): branding a namespace string is a two-line
+// validation, and inlining it keeps `dsh-settings` out of this package's
+// runtime dependencies — the plugin only ever needs the branded TYPE from
+// the seam package (a type-only import, erased at build time).
+const NAMESPACE_PATTERN = /^[a-z][a-z0-9-]*$/
+
+/** Brand a raw string as a settings namespace (lowercase kebab-case). */
+function settingsNamespace(value: string): SettingsNamespace {
+  if (!NAMESPACE_PATTERN.test(value)) {
+    throw new TypeError(`settings namespace "${value}" must match ${String(NAMESPACE_PATTERN)}`)
+  }
+  return value as SettingsNamespace
+}
 
 export const LARK_NOTIFY_SETTINGS_NAMESPACE = settingsNamespace('lark-notify')
 
