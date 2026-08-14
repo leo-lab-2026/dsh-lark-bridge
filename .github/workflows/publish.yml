@@ -1,18 +1,16 @@
-# Publish on version tags (`v0.1.0`, ...): runs the full quality gate, then
-# publishes the prebuilt tarball to npmjs and attaches it to a GitHub Release.
+# Publish on version tags (`v0.1.0`, `v0.1.1-beta.0`, ...): runs the full
+# quality gate, then publishes the prebuilt tarball to npmjs and attaches it
+# to a GitHub Release.
 #
-# Provenance policy:
-# - While the `NPM_TOKEN` secret exists, npm authenticates with it and skips
-#   provenance (npm requires a package to exist before a trusted publisher
-#   can be configured).
-# - After the first release, configure trusted publishing for this workflow
-#   (npm trust publishing --workflow publish.yml --project <owner>/<repo>),
-#   delete the NPM_TOKEN secret, and re-run: publish then uses GitHub OIDC
-#   with --provenance and no stored token.
+# Authentication is npm trusted publishing: npmjs trusts THIS repository +
+# workflow through GitHub OIDC (configured with `npm trust github`), so no
+# npm token is stored anywhere. The `--provenance` flag attaches SLSA build
+# provenance to every published version.
 #
-# The `latest` dist-tag must only ever carry stable versions: publish
-# prereleases (0.x.0-beta.N) with `npm publish --tag next`, not with this
-# workflow's default tag.
+# Dist-tags: prereleases (v*-beta.*/v*-rc.*/v*-pre.*/v*-dev.*) publish under
+# `next`; `latest` only ever carries stable versions.
+# Re-running a tag whose version already exists skips the publish (idempotent)
+# and only refreshes the GitHub Release.
 name: publish
 
 on:
@@ -68,19 +66,21 @@ jobs:
           pnpm test
         working-directory: dsh-lark-bridge
 
-      - name: Publish to npmjs (skips versions already on the registry)
+      - name: Publish to npmjs (OIDC trusted publishing; skips versions already on the registry)
         working-directory: dsh-lark-bridge
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           version="$(node -p "require('./package.json').version")"
           if npm view "dsh-lark-bridge@${version}" version >/dev/null 2>&1; then
             echo "dsh-lark-bridge@${version} is already published — skipping npm publish"
-          elif [ -n "$NODE_AUTH_TOKEN" ]; then
-            npm publish --registry=https://registry.npmjs.org/ --access public
-          else
-            npm publish --registry=https://registry.npmjs.org/ --access public --provenance
+            exit 0
           fi
+          # Prereleases (x.y.z-beta.N / x.y.z-rc.N) go under `next`; the
+          # `latest` dist-tag must only ever carry stable versions.
+          case "$GITHUB_REF_NAME" in
+            *-beta.*|*-rc.*|*-pre.*|*-dev.*) tag="--tag next" ;;
+            *) tag="" ;;
+          esac
+          npm publish --registry=https://registry.npmjs.org/ --access public --provenance $tag
 
       - name: Pack tarball for the release asset
         run: pnpm pack --pack-destination dist

@@ -43,20 +43,27 @@ dsh --profile demo                            # 能启动；/lark-notify status 
 
 ### 3.2 发布到 npmjs（Phase 2）
 
-**首选 CI 发布**（`.github/workflows/publish.yml`，OIDC provenance）：push `v0.1.0` 格式 tag 触发，自动跑门禁后
-`npm publish --provenance --access public`。**手动兜底**（同一命令去掉 `--provenance`）：
+**发布 = 推 tag（全自动，无需任何 npm token）**。发布权已通过 npm trusted publishing
+（GitHub OIDC）委托给 `.github/workflows/publish.yml`：推 `v*` tag 触发，自动跑门禁后
+`npm publish --provenance --access public`，SLSA 构建溯源随版本发布。规则：
+
+- 预发布 tag（`v*-beta.*`/`v*-rc.*`/`v*-pre.*`/`v*-dev.*`）自动走 `next` dist-tag；`latest` 只收稳定版；
+- 版本已存在时幂等跳过发布（仍会刷新 GitHub Release 资产）；
+- 若 workflow 改名或迁移仓库，需重新执行 `npm trust github dsh-lark-bridge --file publish.yml --repository <owner>/<repo> --allow-publish --registry https://registry.npmjs.org/`（该操作要求 2FA，绕过 2FA 的 granular token 会被 npm 拒绝）。
+
+**手动兜底**（仅当 CI 不可用时；本机 `npm login` 后执行）：
 
 ```sh
 npm publish --registry=https://registry.npmjs.org/ --access public
 ```
 
-发布后验证：`npm view dsh-lark-bridge`（latest、README/LICENSE/keywords 齐全）→ 用 registry 包名再做一遍 3.1 彩排。
+发布后验证：`npm view dsh-lark-bridge`（latest、README/LICENSE/keywords 齐全，`provenance` 字段存在）→ 用 registry 包名再做一遍 3.1 彩排。
 
 ### 3.3 GitHub Release 与源码安装路径（Phase 3）
 
 ```sh
 git tag -a v0.1.0 -m "dsh-lark-bridge 0.1.0" && git push origin v0.1.0
-# 在 GitHub 创建 Release：附 pnpm pack 产物 tarball + CHANGELOG 条目
+# publish.yml 自动创建 Release（附 pnpm pack tarball 资产），无需手工操作
 ```
 
 验证辅助渠道：`dsh plugin --profile demo add github:leo-lab-2026/dsh-lark-bridge#v0.1.0`，
