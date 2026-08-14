@@ -98,6 +98,9 @@ git tag -a v0.1.0 -m "dsh-lark-bridge 0.1.0" && git push origin v0.1.0
 | 版本 | 日期 | 方式 | 备注 |
 |---|---|---|---|
 | 0.1.0 | 2026-08-14 | 手动 `npm publish --registry=https://registry.npmjs.org/`（账号 `leo-lab-2026`） | registry 名干净安装彩排通过；`publish.yml` 对已发布版本幂等跳过，推 `v0.1.0` tag 仅创建 GitHub Release |
+| 0.1.1-beta.1 | 2026-08-14 | **CI 全自动（trusted publishing）**：推 `v0.1.1-beta.1` tag | OIDC + SLSA provenance 验证通过（attestations API 可查）；`next` 指向该版，`latest` 仍为 0.1.0；仓库无任何 npm token/secret |
+
+**从 0.1.1-beta.1 起发布已全自动化**：bump `package.json` 版本 + 写 CHANGELOG + 推 `v*` tag 即完成发布（含 provenance 与 GitHub Release）。预发布 tag 自动走 `next`，稳定版 tag 走 `latest`。手动兜底仍可用（§3.2）。
 
 CI 注意事项：两个 workflow 都**钉住**了 harness 提交（`47f943859b`，发布时的公开 master HEAD）。本地 `../deepseek-harness` checkout 升级后，需同步 bump 两处 `ref:` 并重跑本地门禁。
 
