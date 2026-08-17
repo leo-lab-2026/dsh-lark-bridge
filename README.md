@@ -45,6 +45,48 @@ dsh plugin --profile <name> add link:/path/to/dsh-lark-bridge
 
 > **默认无通知目标**：插件安装后的目标为空（不携带任何聊天/用户 id——那是属于你的个人数据）。首次使用时通过下面的「方式 A（`/lark-notify setup`）」或「方式 B（设置面板）」指定一次，写入 `settings.yaml` 持久生效；之后换机器/换会话重新指定即可。
 
+## 更新插件
+
+插件作为 npm 依赖装在 profile 目录里（`$DSH_HOME/profiles/<name>/node_modules`），`dsh plugin` 是 pnpm 转发器；更新后**重启 `dsh`** 生效。
+
+查看当前安装版本：
+
+```sh
+dsh plugin --profile <name> list dsh-lark-bridge
+```
+
+**① 小版本/补丁更新（同 semver 范围内）**：
+
+```sh
+dsh plugin --profile <name> update dsh-lark-bridge
+```
+
+`update` 只在安装时声明的版本范围（如 `^0.1.0`）内找新版本——不跨 minor、默认也不装预发布版。
+
+**② 跨版本 / 预发布版升级（推荐，如 0.1.0 → 0.2.0-beta.1）**：
+
+```sh
+dsh plugin --profile <name> add dsh-lark-bridge@0.2.0-beta.1
+```
+
+`add` 带显式版本会**重写** profile 的依赖声明为该版本，一步完成升级（pnpm 会把它写入 profile 的 `minimumReleaseAgeExclude`，刚发布的新版本也立即生效）。已装 0.1.0 想升到 0.2.0-beta.1 就用这一条；直接跑 `update` 只会停在 0.1.x。
+
+> 为什么不用 `add dsh-lark-bridge@next`：npm 的 `latest` 只指向稳定版，预发布版挂在 `next` 标签下；且 pnpm ≥ 11.21 的 `minimumReleaseAge` 保护会在标签解析时跳过刚发布的新版本（实测 `@next` 可能解析到更旧的 beta），显式版本号最可靠。
+
+**③ 回滚到旧版**：同样用显式版本：
+
+```sh
+dsh plugin --profile <name> add dsh-lark-bridge@0.1.0
+```
+
+**更新后验证**：
+
+```sh
+dsh --profile <name> --dump-config   # 应出现 dsh-lark-notify 行
+```
+
+重启 `dsh` 后进入会话运行 `/lark-notify status`，核对启用的通知类别（0.2.0-beta.1 新增 complete/stop/retry/stall 等）与发送统计。
+
 ## 首次配置（三步，约 5 分钟）
 
 ### 1. 准备飞书应用与 lark-cli

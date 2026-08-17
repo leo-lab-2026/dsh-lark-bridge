@@ -75,7 +75,8 @@ git tag -a v0.1.0 -m "dsh-lark-bridge 0.1.0" && git push origin v0.1.0
 - `latest` **只指向稳定版**；预发布 `0.x.0-beta.N` 必须 `--tag next`（教训：`@cxyhhhhh/dsh-qqbot` 把 dev 版放进了 latest）。
 - 语义化：patch=bug 修复；minor=新功能/新通知类别；0.x 阶段 breaking 可进 minor。
 - **应急回滚：永不 `npm unpublish`**，只用 `npm deprecate dsh-lark-bridge@<坏版本> "upgrade to <新版本>"` + 立刻发补丁版；
-  用户侧 `dsh plugin --profile <name> update dsh-lark-bridge` 即恢复。
+  用户侧恢复：同 semver 范围内 `dsh plugin --profile <name> update dsh-lark-bridge`，跨版本则
+  `dsh plugin --profile <name> add dsh-lark-bridge@<新版本>`（`update` 不会跨越安装时声明的版本范围）——完整用户指引见 README「更新插件」。
 
 ## 5. 发布安全清单（每版人工核对）
 
