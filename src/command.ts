@@ -19,6 +19,7 @@ import type { Config } from './config.js'
 import type { PauseEngine } from './engine.js'
 import { checkLarkAuth } from './health.js'
 import type { PluginLogger } from './logger.js'
+import type { SessionWorkspaceInfo } from './routing.js'
 import type { SetupController, SetupStatus } from './setup.js'
 import { makeIdempotencyKey, type LarkCliTransport } from './transport/lark-cli.js'
 import type { Notifier } from './transport/types.js'
@@ -29,6 +30,10 @@ export interface DebugCommandDeps {
   notifier: Notifier
   transport: LarkCliTransport
   setup: SetupController
+  /** Route-binding capture (binds the current workspace to the captured chat). */
+  routeSetup: SetupController
+  /** Mutable workspace context set by /lark-notify route before capture starts. */
+  routeBind: { workspace: SessionWorkspaceInfo | undefined }
   logger: PluginLogger
 }
 
@@ -51,13 +56,14 @@ export function registerDebugCommand(ctx: Context, deps: DebugCommandDeps): void
   }
   commands.register({
     name: 'lark-notify',
-    description: 'Lark 通知桥：setup 自动配置通知目标 / test 发送测试通知 / status 诊断。',
-    input: { hint: 'setup | test [text] | status' },
+    description: 'Lark 通知桥：setup 自动配置通知目标 / route 按工作区路由 / test 发送测试通知 / status 诊断。',
+    input: { hint: 'setup | route | test [text] | status' },
     recordInput: false,
     handler: async (invocation) => {
       const input = invocation.rawInput.trim()
       if (input === '' || input === 'status') return runStatus(deps)
       if (input === 'setup' || input.startsWith('setup ')) return runSetup(deps)
+      if (input === 'route' || input.startsWith('route ')) return runRoute(deps, invocation)
       if (input === 'test' || input.startsWith('test ')) {
         const text = input.slice('test'.length).trim() || 'dsh-lark-bridge test message'
         const ok = await deps.notifier.send({
@@ -68,13 +74,13 @@ export function registerDebugCommand(ctx: Context, deps: DebugCommandDeps): void
           ? { kind: 'success', text: '测试通知已发送 — 去飞书确认' }
           : { kind: 'error', text: '发送失败 — 运行 /lark-notify status 查看原因' }
       }
-      return { kind: 'error', text: '用法: /lark-notify setup | test [text] | status' }
+      return { kind: 'error', text: '用法: /lark-notify setup | route | test [text] | status' }
     },
   })
 }
 
 async function runStatus(deps: DebugCommandDeps): Promise<{ kind: 'success'; text: string }> {
-  const { config, engine, notifier, transport, setup, logger } = deps
+  const { config, engine, notifier, transport, setup, routeSetup, logger } = deps
   const target = transport.currentTarget()
   const auth = await checkLarkAuth(config.bin, AUTH_CHECK_TIMEOUT_MS, logger)
   const stats = notifier.status()
@@ -92,8 +98,9 @@ async function runStatus(deps: DebugCommandDeps): Promise<{ kind: 'success'; tex
     `发送统计: ${stats.sent} 成功 / ${stats.failed} 失败`,
     stats.lastError !== undefined ? `最近错误: ${stats.lastError}` : '',
     `setup: ${describeSetup(setup.status())}`,
+    `route: ${describeSetup(routeSetup.status())}`,
     `通知类别: ${enabledCategories.join(', ')}`,
-    `grace 中待发: ${engine.pendingCount()} | idle 宽限中: ${engine.idleWaitCount()} | 已跟踪会话: ${engine.trackedSessionCount()} | 已缓存标题会话: ${engine.watchedSessionCount()}`,
+    `grace 中待发: ${engine.pendingCount()} | idle 宽限中: ${engine.idleWaitCount()} | 已跟踪会话: ${engine.trackedSessionCount()} | 已缓存标题会话: ${engine.watchedSessionCount()} | 已解析工作区: ${engine.workspaceCount()}`,
   ].filter(line => line !== '')
 
   const hints: string[] = []
@@ -126,5 +133,46 @@ async function runSetup(deps: DebugCommandDeps): Promise<{ kind: 'success' | 'er
     kind: 'success',
     text: `已开始监听（${timeoutMinutes} 分钟窗口）。现在去飞书给机器人发送任意一条消息；`
       + '捕获后会自动保存通知目标并发送一条测试通知。进度见 /lark-notify status。',
+  }
+}
+
+/**
+ * Bind the current workspace to the chat the user messages the bot from
+ * (typically the project's Feishu group): captures one message, persists the
+ * workspace → chat routing entry, sends a confirmation.
+ */
+async function runRoute(
+  deps: DebugCommandDeps,
+  invocation: { agent: { session?: { id: unknown; header?: { cwd?: string } } } },
+): Promise<{ kind: 'success' | 'error'; text: string }> {
+  const { config, engine, routeSetup, routeBind, logger } = deps
+  const sessionId = invocation.agent.session?.id
+  if (sessionId === undefined) {
+    return { kind: 'error', text: '无法确定当前会话 — 请在 DSH 会话内运行 /lark-notify route。' }
+  }
+  const workspace = engine.workspaceInfoOf(sessionId as never)
+  if (workspace === undefined) {
+    return { kind: 'error', text: '无法确定当前会话所属工作区/项目（既无工作区注册也无会话工作目录）。' }
+  }
+  const auth = await checkLarkAuth(config.bin, AUTH_CHECK_TIMEOUT_MS, logger)
+  if (!auth.ok) {
+    return {
+      kind: 'error',
+      text: `无法开始：${auth.detail}${auth.hint !== undefined ? `\n${auth.hint}` : ''}`,
+    }
+  }
+  if (routeSetup.isActive()) {
+    return { kind: 'success', text: '已在监听路由绑定中：现在去目标飞书群给机器人发送任意一条消息即可。' }
+  }
+  routeBind.workspace = workspace
+  void routeSetup.run().then(
+    (outcome) => { logger.info(`[dsh-lark-notify] route: ${outcome.message}`) },
+  )
+  const timeoutMinutes = Math.max(1, Math.round(config.setupTimeoutMs / 60_000))
+  return {
+    kind: 'success',
+    text: `开始绑定 工作区「${workspace.title}」（${workspace.path}）。`
+      + `请把机器人拉进目标飞书群，然后在群里给机器人发送任意一条消息（${timeoutMinutes} 分钟窗口）。`
+      + '捕获后该工作区的所有 DSH 通知将发到该群；未绑定工作区仍走全局默认目标。进度见 /lark-notify status。',
   }
 }

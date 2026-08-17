@@ -8,7 +8,7 @@
  * @module dsh-lark-bridge/categories/complete
  */
 
-import { renderTemplate } from '../render.js'
+import { renderTemplate, WORKSPACE_DROP_RULE } from '../render.js'
 import { makeIdempotencyKey } from '../transport/lark-cli.js'
 import type { Category, CategoryEngine, SessionRef, TurnEndSummary } from './types.js'
 
@@ -24,7 +24,7 @@ export const completeCategory: Category = {
       text: renderTemplate(engine.templateFor('complete'), {
         ...engine.commonVars(session),
         turn: lastTurnEnd.turn,
-      }),
+      }, { dropEmptyVarLine: WORKSPACE_DROP_RULE }),
       idempotencyKey: makeIdempotencyKey(['complete', String(session.id), String(lastTurnEnd.turn)]),
     }))
   },

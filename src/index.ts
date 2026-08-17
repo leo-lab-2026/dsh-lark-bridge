@@ -49,6 +49,7 @@ import { registerDebugCommand } from './command.js'
 import type { Config as PluginConfig } from './config.js'
 import { PauseEngine } from './engine.js'
 import { renderTemplate } from './render.js'
+import { matchRoute, upsertRoute, type SessionWorkspaceInfo } from './routing.js'
 import { installUserSettings } from './settings.js'
 import { SetupController } from './setup.js'
 import { LarkCliTransport, makeIdempotencyKey } from './transport/lark-cli.js'
@@ -100,6 +101,8 @@ export function apply(ctx: Context, config: PluginConfig): void {
     logger,
     timeout: (callback, delay) => ctx.timeout(callback, delay),
     interval: (callback, delay) => ctx.interval(callback, delay),
+    // Per-workspace routing: resolve from live settings each emit.
+    routeResolver: (workspace) => matchRoute(currentSettings().routing, workspace),
   })
   engine.install(ctx)
 
@@ -160,7 +163,47 @@ export function apply(ctx: Context, config: PluginConfig): void {
   // Plugin unload cancels any in-flight capture (SIGTERM, no orphans).
   ctx.effect(() => () => setup.stop())
 
-  registerDebugCommand(ctx, { config, engine, notifier: transport, transport, setup, logger })
+  // Per-workspace routing: `/lark-notify route` binds the current workspace
+  // to the chat the user messages the bot from (typically a project group).
+  // The bind context (workspace title + path) is set by the command before
+  // the capture starts and read by the capture's onCaptured on completion.
+  const routeBind: { workspace: SessionWorkspaceInfo | undefined } = { workspace: undefined }
+  const routeSetup = new SetupController({
+    bin: config.bin,
+    identity: config.identity,
+    captureTimeoutMs: config.setupTimeoutMs,
+    logger,
+    onCaptured: async (message) => {
+      const workspace = routeBind.workspace
+      if (workspace === undefined) {
+        throw new Error('路由绑定的工作区上下文缺失（请重新运行 /lark-notify route）')
+      }
+      const routing = upsertRoute(currentSettings().routing, {
+        title: workspace.title,
+        path: workspace.path,
+        chatId: message.chatId,
+        userId: '',
+      })
+      await userSettings.scope?.update({ routing })
+      await transport.send({
+        text: `✅ 已绑定 工作区「${workspace.title}」→ 本会话。之后该工作区的 DSH 通知会发送到这里。`,
+        idempotencyKey: makeIdempotencyKey(['route', workspace.path, message.chatId, String(Date.now())]),
+        target: { chatId: message.chatId, userId: '' },
+      })
+    },
+  })
+  ctx.effect(() => () => routeSetup.stop())
+
+  registerDebugCommand(ctx, {
+    config,
+    engine,
+    notifier: transport,
+    transport,
+    setup,
+    routeSetup,
+    routeBind,
+    logger,
+  })
 
   logger.info(
     `[dsh-lark-notify] loaded (target: ${targetConfigured ? 'configured' : 'none'}, `

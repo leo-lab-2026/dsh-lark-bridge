@@ -12,7 +12,7 @@
 
 import type { AgentStatus } from '@deepseek-ai/dsh-agent'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
-import { renderTemplate } from '../render.js'
+import { renderTemplate, WORKSPACE_DROP_RULE } from '../render.js'
 import { makeIdempotencyKey } from '../transport/lark-cli.js'
 import type { Category, CategoryEngine, SessionRef } from './types.js'
 
@@ -59,7 +59,7 @@ export function createStallCategory(): Category {
           text: renderTemplate(engine.templateFor('stall'), {
             ...engine.commonVars(session),
             stalledMin: Math.floor(stalledFor / 60_000),
-          }),
+          }, { dropEmptyVarLine: WORKSPACE_DROP_RULE }),
           idempotencyKey: makeIdempotencyKey(['stall', id, String(nowMs)]),
         }))
       }

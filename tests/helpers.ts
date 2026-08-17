@@ -40,6 +40,20 @@ export function sessionId(value: string): SessionId {
   return value as SessionId
 }
 
+/** A session fixture with an optional header cwd (mirrors a real DSH Session). */
+export function makeSession(id: string, cwd?: string): { id: SessionId; header?: { cwd?: string } } {
+  return { id: sessionId(id), ...(cwd !== undefined ? { header: { cwd } } : {}) }
+}
+
+/** Build a fake workspace-registry provider from workspace records. */
+export function makeWorkspaceRegistry(
+  workspaces: readonly { title: string; path: string; sessionIds: readonly string[] }[],
+): () => { list: () => typeof workspaces } {
+  return () => ({
+    list: () => workspaces.map(workspace => ({ ...workspace })),
+  })
+}
+
 /** In-memory settings provider: real settings resolution without file I/O. */
 export class MemorySettingsProvider extends SettingsProvider {
   override readonly writable = true
@@ -189,6 +203,7 @@ export function sessionTitleEvent(title: string): SessionEvent<'session/title'> 
 export function testConfig(overrides: Partial<Config> = {}): Config {
   return {
     target: { chatId: '', userId: '' },
+    routing: [],
     webUrl: 'http://127.0.0.1:3080',
     identity: 'bot',
     bin: 'lark-cli',

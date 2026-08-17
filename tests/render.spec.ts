@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderOptions, renderTemplate } from '../src/render.js'
+import { renderOptions, renderTemplate, WORKSPACE_DROP_RULE } from '../src/render.js'
 
 describe('renderTemplate', () => {
   it('replaces variables and leaves unknown placeholders empty', () => {
@@ -30,6 +30,36 @@ describe('renderTemplate', () => {
   it('does not drop a line with other static content', () => {
     const text = renderTemplate('{question}\nResult: {options}', { question: 'q?', options: '' }, { dropEmptyOptionsLine: true })
     expect(text).toBe('q?\nResult:')
+  })
+})
+
+describe('renderTemplate dropEmptyVarLine', () => {
+  it('drops a label-only workspace line when workspace is empty', () => {
+    const template = '🔔 标题\n工作区: {workspace}\n会话: {sessionTitle}'
+    const text = renderTemplate(template, { workspace: '', sessionTitle: 's1' }, { dropEmptyVarLine: WORKSPACE_DROP_RULE })
+    expect(text).toBe('🔔 标题\n会话: s1')
+  })
+
+  it('keeps the workspace line when a value is present', () => {
+    const template = '🔔 标题\n工作区: {workspace}\n会话: {sessionTitle}'
+    const text = renderTemplate(template, { workspace: 'my-project', sessionTitle: 's1' }, { dropEmptyVarLine: WORKSPACE_DROP_RULE })
+    expect(text).toBe('🔔 标题\n工作区: my-project\n会话: s1')
+  })
+
+  it('drops full-width and English label variants', () => {
+    expect(renderTemplate('工作区：{workspace}', { workspace: '' }, { dropEmptyVarLine: WORKSPACE_DROP_RULE })).toBe('')
+    expect(renderTemplate('Workspace: {workspace}', { workspace: '' }, { dropEmptyVarLine: WORKSPACE_DROP_RULE })).toBe('')
+    expect(renderTemplate('Project: {workspace}', { workspace: '' }, { dropEmptyVarLine: WORKSPACE_DROP_RULE })).toBe('')
+  })
+
+  it('keeps a line that mixes the workspace var with other content', () => {
+    const template = '项目 {workspace} 编号 42'
+    expect(renderTemplate(template, { workspace: '' }, { dropEmptyVarLine: WORKSPACE_DROP_RULE })).toBe('项目  编号 42')
+  })
+
+  it('keeps a line whose label is not in the accepted prefixes', () => {
+    const template = '上下文: {workspace}'
+    expect(renderTemplate(template, { workspace: '' }, { dropEmptyVarLine: WORKSPACE_DROP_RULE })).toBe('上下文:')
   })
 })
 

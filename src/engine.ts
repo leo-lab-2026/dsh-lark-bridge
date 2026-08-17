@@ -25,6 +25,7 @@ import type { AgentStatus } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import { basename } from 'node:path'
 import { completeCategory } from './categories/complete.js'
 import { errorCategory } from './categories/error.js'
 import { permissionCategory } from './categories/permission.js'
@@ -36,7 +37,9 @@ import type { Category, CategoryEngine, SessionRef, TurnEndSummary } from './cat
 import type { Config } from './config.js'
 import type { PluginLogger } from './logger.js'
 import { SessionMeta } from './session-meta.js'
+import type { SessionWorkspaceInfo } from './routing.js'
 import type { Notifier, NotificationMessage } from './transport/types.js'
+import { WorkspaceIndex, type WorkspaceRegistryLike, type WorkspaceRegistryProvider } from './workspace.js'
 
 /** Timer seam: schedule a callback, return a disposer that cancels it. */
 export type TimeoutFn = (callback: () => void, delay: number) => () => void
@@ -49,6 +52,14 @@ export interface PauseEngineOptions {
   /** Repeating timer seam (cordis `ctx.interval`); used for the stall scan. */
   interval: TimeoutFn
   now?: () => number
+  /** Workspace-registry accessor (defaults to reading `ctx.get('workspaceRegistry')`). */
+  workspaceRegistry?: WorkspaceRegistryProvider
+  /**
+   * Per-workspace routing: given a session's workspace info (title + path),
+   * return a target override, or undefined to fall back to the default
+   * target. Reads live config each emit (no restart needed).
+   */
+  routeResolver?: (workspace: SessionWorkspaceInfo | undefined) => { chatId?: string; userId?: string } | undefined
 }
 
 const DEFAULT_THROTTLE_MS = 300_000
@@ -56,6 +67,8 @@ const DEFAULT_IDLE_GRACE_MS = 5_000
 const DEFAULT_STALL_MS = 600_000
 /** Upper bound for the stall scan cadence (the scan itself is near-free). */
 const MAX_SCAN_INTERVAL_MS = 60_000
+/** How often the session → workspace index resyncs with the registry (cheap in-memory projection). */
+const WORKSPACE_REFRESH_INTERVAL_MS = 60_000
 
 /** Structural read of `session.header.origin` (Session / Agent.session both carry it). */
 function isSubagentSession(value: unknown): boolean {
@@ -72,6 +85,10 @@ export class PauseEngine implements CategoryEngine {
   private readonly lastTurnEnds = new Map<string, TurnEndSummary>()
   private readonly idleTimers = new Map<string, () => void>()
   private readonly subagentSessions = new Set<string>()
+  private readonly workspaceIndex = new WorkspaceIndex()
+  private readonly workspaceRegistry: WorkspaceRegistryProvider
+  private readonly routeResolver: (workspace: SessionWorkspaceInfo | undefined) => { chatId?: string; userId?: string } | undefined
+  private lastWorkspaceRefresh = 0
   private readonly clock: () => number
   private readonly categories: readonly Category[] = [
     permissionCategory,
@@ -85,7 +102,13 @@ export class PauseEngine implements CategoryEngine {
 
   constructor(private readonly options: PauseEngineOptions) {
     this.clock = options.now ?? Date.now
+    this.workspaceRegistry = options.workspaceRegistry
+      ?? (() => this.ctx?.get('workspaceRegistry') as WorkspaceRegistryLike | undefined)
+    this.routeResolver = options.routeResolver ?? (() => undefined)
+    this.lastWorkspaceRefresh = 0
   }
+
+  private ctx: Context | undefined
 
   get graceMs(): number {
     return this.options.config.graceMs
@@ -93,6 +116,8 @@ export class PauseEngine implements CategoryEngine {
 
   /** Install the global listeners (session events + agent status) and the stall scan. */
   install(ctx: Context): void {
+    this.ctx = ctx
+    this.refreshWorkspaces()
     ctx.on('session/event', (session, event) => {
       try {
         this.dispatch(session, event)
@@ -103,7 +128,7 @@ export class PauseEngine implements CategoryEngine {
     })
     ctx.on('agent/status', ({ agent, status }) => {
       try {
-        this.onAgentStatus(agent.id, isSubagentSession(agent.session), status)
+        this.onAgentStatus(agent.session, status)
       } catch (error) {
         this.options.logger.error('[dsh-lark-notify] agent/status handler failure (contained)', error)
       }
@@ -113,7 +138,8 @@ export class PauseEngine implements CategoryEngine {
     }, this.scanIntervalMs())
   }
 
-  private dispatch(session: SessionRef, event: SessionEvent): void {
+  private dispatch(session: SessionRef & { header?: { cwd?: string } }, event: SessionEvent): void {
+    this.meta.observeHeader(session.id, session.header)
     this.meta.observe(session.id, event)
     if (isSubagentSession(session)) this.subagentSessions.add(String(session.id))
     if (event.type === 'turn/end') {
@@ -129,9 +155,12 @@ export class PauseEngine implements CategoryEngine {
     }
   }
 
-  private onAgentStatus(sessionId: SessionId, subagent: boolean, status: AgentStatus): void {
+  private onAgentStatus(agentSession: { id: SessionId; header?: { cwd?: string } }, status: AgentStatus): void {
+    const sessionId = agentSession.id
     const id = String(sessionId)
+    this.meta.observeHeader(sessionId, agentSession.header)
     this.agentStatuses.set(id, status)
+    const subagent = isSubagentSession(agentSession)
     if (subagent) this.subagentSessions.add(id)
     const pendingIdle = this.idleTimers.get(id)
     if (pendingIdle !== undefined) {
@@ -179,6 +208,20 @@ export class PauseEngine implements CategoryEngine {
         this.options.logger.warn(`[dsh-lark-notify] category "${category.id}" tick failure (contained)`, error)
       }
     }
+    this.maybeRefreshWorkspaces()
+  }
+
+  /** Resync the session → workspace index when the registry cadence elapses. */
+  private maybeRefreshWorkspaces(): void {
+    const now = this.clock()
+    if (now - this.lastWorkspaceRefresh < WORKSPACE_REFRESH_INTERVAL_MS) return
+    this.refreshWorkspaces(now)
+  }
+
+  /** Rebuild the session → workspace index from the registry projection. */
+  private refreshWorkspaces(now = this.clock()): void {
+    this.lastWorkspaceRefresh = now
+    this.workspaceIndex.refresh(this.workspaceRegistry)
   }
 
   private scanIntervalMs(): number {
@@ -257,12 +300,43 @@ export class PauseEngine implements CategoryEngine {
 
   commonVars(session: SessionRef): Record<string, string> {
     const sessionId = String(session.id)
+    const info = this.workspaceInfo(session)
     return {
       sessionId,
       sessionTitle: this.meta.titleOf(session.id) ?? sessionId,
+      workspace: info.title,
+      workspaceTitle: info.title,
+      workspacePath: info.path,
+      cwd: this.meta.cwdOf(session.id) ?? '',
       webUrl: this.options.config.webUrl,
       time: new Date(this.clock()).toTimeString().slice(0, 8),
     }
+  }
+
+  /**
+   * Resolve a session's workspace identity ({title, path}): registry title →
+   * cwd basename, registry path → cwd. Used by templates and by routing.
+   */
+  workspaceInfo(session: SessionRef): SessionWorkspaceInfo {
+    const sessionId = String(session.id)
+    const workspace = this.workspaceIndex.workspaceOf(sessionId)
+    const cwd = this.meta.cwdOf(session.id)
+    const title = workspace !== undefined && workspace.title.trim() !== ''
+      ? workspace.title
+      : cwd !== undefined
+        ? basename(cwd)
+        : ''
+    const path = workspace !== undefined && workspace.path.trim() !== ''
+      ? workspace.path
+      : (cwd ?? '')
+    return { title, path }
+  }
+
+  /** Resolve a session's workspace identity by id (command /lark-notify route). */
+  workspaceInfoOf(sessionId: SessionId): SessionWorkspaceInfo | undefined {
+    const info = this.workspaceInfo({ id: sessionId })
+    if (info.title === '' && info.path === '') return undefined
+    return info
   }
 
   // ---- internals ----------------------------------------------------------
@@ -293,6 +367,9 @@ export class PauseEngine implements CategoryEngine {
       this.options.logger.warn(`[dsh-lark-notify] "${categoryId}" render failure (contained)`, error)
       return
     }
+    // Per-workspace routing: a matching route overrides the default target.
+    const route = this.routeResolver(this.workspaceInfo(session))
+    if (route !== undefined) message = { ...message, target: route }
     this.options.logger.info(`[dsh-lark-notify] ${categoryId}: ${message.text.replaceAll('\n', ' | ')}`)
     void this.options.notifier.send(message).catch((error: unknown) => {
       this.options.logger.warn('[dsh-lark-notify] send rejected (contained)', error)
@@ -309,6 +386,11 @@ export class PauseEngine implements CategoryEngine {
   /** Number of sessions with a cached title. */
   watchedSessionCount(): number {
     return this.meta.size()
+  }
+
+  /** Number of sessions resolved to a workspace (diagnostics). */
+  workspaceCount(): number {
+    return this.workspaceIndex.size()
   }
 
   /** Number of sessions whose agent went idle and still await their idle grace window. */

@@ -19,7 +19,7 @@
  */
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { renderTemplate } from '../render.js'
+import { renderTemplate, WORKSPACE_DROP_RULE } from '../render.js'
 import { makeIdempotencyKey } from '../transport/lark-cli.js'
 import type { Category, CategoryEngine, SessionRef, TurnEndSummary } from './types.js'
 
@@ -91,7 +91,7 @@ function settle(
       vars.cancelCause = reason.reason.kind === 'hook' ? `hook (${reason.reason.reason})` : reason.reason.kind
     }
     return {
-      text: renderTemplate(engine.templateFor(kind.id), vars),
+      text: renderTemplate(engine.templateFor(kind.id), vars, { dropEmptyVarLine: WORKSPACE_DROP_RULE }),
       idempotencyKey: makeIdempotencyKey([kind.id, String(session.id), String(lastTurnEnd.turn)]),
     }
   })

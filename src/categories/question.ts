@@ -10,7 +10,7 @@
  */
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { renderOptions, renderTemplate, type RenderOption } from '../render.js'
+import { renderOptions, renderTemplate, WORKSPACE_DROP_RULE, type RenderOption } from '../render.js'
 import { makeIdempotencyKey } from '../transport/lark-cli.js'
 import type { NotificationMessage } from '../transport/types.js'
 import type { Category, CategoryEngine, SessionRef } from './types.js'
@@ -78,7 +78,7 @@ function buildMessage(engine: CategoryEngine, session: SessionRef, questions: Pa
       header: question.header ?? '问题',
       question: question.question,
       options: renderOptions(question.options),
-    }, { dropEmptyOptionsLine: true })
+    }, { dropEmptyOptionsLine: true, dropEmptyVarLine: WORKSPACE_DROP_RULE })
   } else {
     const itemTemplate = engine.templateFor('question', 'itemTemplate')
     const items = questions.map((question, index) =>
@@ -92,7 +92,7 @@ function buildMessage(engine: CategoryEngine, session: SessionRef, questions: Pa
     text = renderTemplate(engine.templateFor('question', 'templateMultiple'), {
       ...common,
       questions: items,
-    })
+    }, { dropEmptyVarLine: WORKSPACE_DROP_RULE })
   }
   return {
     text,

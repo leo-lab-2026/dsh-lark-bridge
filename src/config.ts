@@ -5,7 +5,8 @@
  * fail loudly at load time (Cordis config validation).
  *
  * Template variables (per category, see docs/09 for the full table):
- *   common:          {sessionId} {sessionTitle} {webUrl} {time}
+ *   common:          {sessionId} {sessionTitle} {workspace} {workspaceTitle}
+ *                    {workspacePath} {cwd} {webUrl} {time}
  *   permission:      {tool} {reason}
  *   question:        {header} {question} {options} {questions} {number}
  *   error:           {errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}
@@ -18,10 +19,23 @@
  *                    {mode} {errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}
  *   stall:           {stalledMin}
  *   goodbye:         {time}
+ *
+ * Workspace variables resolve from the DSH workspace registry (when present)
+ * and fall back to the session's working directory (header.cwd basename):
+ *   {workspace}       = {workspaceTitle} (friendly project name)
+ *   {workspaceTitle}  = workspace registry title → basename(cwd)
+ *   {workspacePath}   = workspace registry path → cwd
+ *   {cwd}             = session header working directory
+ *
+ * Routing (`config.routing`): optional per-workspace target overrides. Each
+ * entry binds a workspace (by title + path) to a dedicated chatId/userId.
+ * Matching prefers the exact title, then falls back to the path (stable
+ * across renames). A workspace with no route falls back to `target`.
  * @module dsh-lark-bridge/config
  */
 
 import z from '@deepseek-ai/schemastery'
+import type { RoutingEntry } from './routing.js'
 
 /** Notification destination: a p2p chat_id (recommended) or a user open_id. */
 export interface NotificationTarget {
@@ -98,6 +112,8 @@ export interface WatchdogConfig {
 /** Complete validated plugin configuration. */
 export interface Config {
   target: NotificationTarget
+  /** Per-workspace routing overrides (deployment default; users edit via settings panel). */
+  routing: RoutingEntry[]
   /** Base URL of the DSH Web GUI shown in notifications. */
   webUrl: string
   /** lark-cli `--as` identity used for sends. */
@@ -132,18 +148,18 @@ export interface Config {
   }
 }
 
-export const DEFAULT_PERMISSION_TEMPLATE = '🔔 DSH 权限申请\n会话: {sessionTitle} ({sessionId})\n工具: {tool}\n原因: {reason}\n→ {webUrl}'
-export const DEFAULT_QUESTION_TEMPLATE = '❓ DSH 正在等待你的回答\n会话: {sessionTitle} ({sessionId})\n{header}\n{question}\nOptions: {options}\n→ {webUrl}'
-export const DEFAULT_QUESTION_TEMPLATE_MULTIPLE = '❓ DSH 正在等待你的回答\n会话: {sessionTitle} ({sessionId})\n\n{questions}\n→ {webUrl}'
+export const DEFAULT_PERMISSION_TEMPLATE = '🔔 DSH 权限申请\n工作区: {workspace}\n会话: {sessionTitle} ({sessionId})\n工具: {tool}\n原因: {reason}\n→ {webUrl}'
+export const DEFAULT_QUESTION_TEMPLATE = '❓ DSH 正在等待你的回答\n工作区: {workspace}\n会话: {sessionTitle} ({sessionId})\n{header}\n{question}\nOptions: {options}\n→ {webUrl}'
+export const DEFAULT_QUESTION_TEMPLATE_MULTIPLE = '❓ DSH 正在等待你的回答\n工作区: {workspace}\n会话: {sessionTitle} ({sessionId})\n\n{questions}\n→ {webUrl}'
 export const DEFAULT_QUESTION_ITEM_TEMPLATE = '{number}. {header}\n   {question}\n   Options: {options}'
-export const DEFAULT_ERROR_TEMPLATE = '⚠️ DSH 会话出错停止\n会话: {sessionTitle} ({sessionId})\n错误: [{errorLabel}]\n详情: {errorMessage}\n→ {webUrl}'
-export const DEFAULT_COMPLETE_TEMPLATE = '✅ DSH 任务完成\n会话: {sessionTitle} ({sessionId})\n轮次: {turn}\n→ {webUrl}'
-export const DEFAULT_STOP_BLOCKED_TEMPLATE = '🚫 DSH 目标阻塞\n会话: {sessionTitle} ({sessionId})\n原因: {reason}\n→ {webUrl}'
-export const DEFAULT_STOP_MAX_TOKENS_TEMPLATE = '✂️ DSH 输出达到令牌上限\n会话: {sessionTitle} ({sessionId})\n轮次: {turn}\n→ {webUrl}'
-export const DEFAULT_STOP_ABORTED_TEMPLATE = '🛑 DSH 轮次被中止\n会话: {sessionTitle} ({sessionId})\n原因: {cancelCause}\n→ {webUrl}'
-export const DEFAULT_STOP_INTERRUPTED_TEMPLATE = '⚠️ DSH 异常中断的轮次已闭合\n会话: {sessionTitle} ({sessionId})\n轮次: {turn}\n→ {webUrl}'
-export const DEFAULT_RETRY_TEMPLATE = '🔁 DSH 正在重试模型请求\n会话: {sessionTitle} ({sessionId})\n重试: {retry}{maxRetriesLabel}\n退避: {delaySec}s\n错误: [{errorLabel}]\n详情: {errorMessage}\n→ {webUrl}'
-export const DEFAULT_STALL_TEMPLATE = '⏳ DSH 长时间无进展\n会话: {sessionTitle} ({sessionId})\n停滞: {stalledMin} 分钟\n→ {webUrl}'
+export const DEFAULT_ERROR_TEMPLATE = '⚠️ DSH 会话出错停止\n工作区: {workspace}\n会话: {sessionTitle} ({sessionId})\n错误: [{errorLabel}]\n详情: {errorMessage}\n→ {webUrl}'
+export const DEFAULT_COMPLETE_TEMPLATE = '✅ DSH 任务完成\n工作区: {workspace}\n会话: {sessionTitle} ({sessionId})\n轮次: {turn}\n→ {webUrl}'
+export const DEFAULT_STOP_BLOCKED_TEMPLATE = '🚫 DSH 目标阻塞\n工作区: {workspace}\n会话: {sessionTitle} ({sessionId})\n原因: {reason}\n→ {webUrl}'
+export const DEFAULT_STOP_MAX_TOKENS_TEMPLATE = '✂️ DSH 输出达到令牌上限\n工作区: {workspace}\n会话: {sessionTitle} ({sessionId})\n轮次: {turn}\n→ {webUrl}'
+export const DEFAULT_STOP_ABORTED_TEMPLATE = '🛑 DSH 轮次被中止\n工作区: {workspace}\n会话: {sessionTitle} ({sessionId})\n原因: {cancelCause}\n→ {webUrl}'
+export const DEFAULT_STOP_INTERRUPTED_TEMPLATE = '⚠️ DSH 异常中断的轮次已闭合\n工作区: {workspace}\n会话: {sessionTitle} ({sessionId})\n轮次: {turn}\n→ {webUrl}'
+export const DEFAULT_RETRY_TEMPLATE = '🔁 DSH 正在重试模型请求\n工作区: {workspace}\n会话: {sessionTitle} ({sessionId})\n重试: {retry}{maxRetriesLabel}\n退避: {delaySec}s\n错误: [{errorLabel}]\n详情: {errorMessage}\n→ {webUrl}'
+export const DEFAULT_STALL_TEMPLATE = '⏳ DSH 长时间无进展\n工作区: {workspace}\n会话: {sessionTitle} ({sessionId})\n停滞: {stalledMin} 分钟\n→ {webUrl}'
 export const DEFAULT_GOODBYE_TEMPLATE = '👋 DSH 已正常退出\n时间: {time}'
 
 /** Idle grace window applied to the complete/stop idle model (doc 09 §7.1). */
@@ -155,6 +171,12 @@ export const Config: z<Config> = z.object({
     chatId: z.string().default(''),
     userId: z.string().default(''),
   }),
+  routing: z.array(z.object({
+    title: z.string().default(''),
+    path: z.string().default(''),
+    chatId: z.string().default(''),
+    userId: z.string().default(''),
+  })).default([]),
   webUrl: z.string().default('http://127.0.0.1:3080'),
   identity: z.union(['bot', 'user'] as const).default('bot'),
   bin: z.string().default('lark-cli'),

@@ -47,8 +47,10 @@ src/
 ├── engine.ts           # PauseEngine：session/event + agent/status 双监听、idle 宽限竞态、
 │                       #   grace 竞态、防抖、节流、周期性 tick（stall 扫描）、
 │                       #   标题缓存、失败包容、发送调度（唯一动 timer 的地方）
-├── session-meta.ts     # 从 session/title 折叠每会话最新标题
-├── render.ts           # {var} 模板渲染 + Options 空行省略 + 选项列表渲染
+├── session-meta.ts     # 从 session/title 折叠每会话最新标题；缓存 header.cwd
+├── workspace.ts        # WorkspaceIndex：session → 工作区（title/path）索引，从 ctx.workspaceRegistry 重建
+├── routing.ts          # matchRoute/upsertRoute：工作区 → 专属通知目标的路由匹配与绑定
+├── render.ts           # {var} 模板渲染 + Options/工作区空行省略 + 选项列表渲染
 ├── logger.ts           # PluginLogger 结构类型（cordis Logger 天然满足）
 ├── health.ts           # lark-cli 存在性/认证状态检查（auth status 信封解析 + 可执行提示）
 ├── setup.ts            # SetupController：引导式目标发现（状态机：listening/success/failed，可中止）
@@ -81,6 +83,7 @@ src/
 **数据流**：
 ```
 session/event ─▶ PauseEngine（只观察）
+  ├ session.header.cwd ─▶ SessionMeta（工作目录缓存）
   ├ session/title ─▶ 标题缓存
   ├ approval/asked ─▶ permission.beginPause(key=approval:<id>) ─ctx.timeout(graceMs)─▶ emit()
   │   approval/decided(同 id) ─▶ settlePause（取消）
@@ -89,14 +92,16 @@ session/event ─▶ PauseEngine（只观察）
   ├ turn/end ─▶ 记入 lastTurnEnd（idle 归因事实）；reason=error ─▶ error.notifyNow（无 grace；throttle 节流）
   ├ tool/call(update_goal action=blocked) ─▶ stop 族 blocked 归因缓存
   └ llm/retry ─▶ retry.handle（retry≥阈值 ─▶ notifyNow，interval 节流）
+ctx.workspaceRegistry ─▶ WorkspaceIndex（install 时 + 周期 tick 重建 session→工作区）
 agent/status ─▶ PauseEngine（只观察）
   ├ running ─▶ 取消该会话 idle 宽限计时器（goal 自动续轮/loop followup 去噪）
   └ idle ─▶ 挂 idle 宽限计时器（默认 5s）── 超时仍 idle ─▶ settleIdle(lastTurnEnd) ─▶
             complete/stop 族各自归因 ─▶ notifyNow（per-session 节流）
 ctx.interval(tick) ─▶ stall.tick：running 且 stallMs 无事件 ─▶ notify（repeatMs 重复提醒）
+                      + WorkspaceIndex 周期重建
 dispose（根 fiber 卸载） ─▶ goodbye「DSH 已正常退出」；watchdog 心跳文件供进程外监督者
-emit() ─▶ enabled? → debounce(会话×类别) → make()渲染(包容) → logger.info → notifier.send
-LarkCliTransport ─▶ 串行队列 ─▶ spawn lark-cli（成功信封 ok=true 才算送达；失败告警计数）
+emit() ─▶ enabled? → debounce(会话×类别) → make()渲染(包容，commonVars 含 workspace 信息) → matchRoute(routing, workspace) 命中则覆盖 message.target → logger.info → notifier.send
+LarkCliTransport ─▶ 串行队列 ─▶ spawn lark-cli（成功信封 ok=true 才算送达；失败告警计数；message.target 覆盖默认 target）
 ```
 
 **失败包容**：事件监听回调、类别 handle、渲染 make 全部 try/catch，异常只进 `ctx.logger`；`notifier.send` 自身绝不 reject。lark-cli 缺失（ENOENT）→ warn + 计数，插件继续运转。
@@ -152,7 +157,7 @@ Schemastery 对嵌套对象自动补字段默认值并响亮拒绝非法值（�
 
 | 类别 | 变量 |
 |---|---|
-| 公共 | `{sessionId}` `{sessionTitle}`（未缓存时=会话 id） `{webUrl}` `{time}` |
+| 公共 | `{sessionId}` `{sessionTitle}`（未缓存时=会话 id） `{workspace}` `{workspaceTitle}`（工作区名称；回退=cwd basename） `{workspacePath}`（工作区路径；回退=cwd） `{cwd}`（会话 header 工作目录） `{webUrl}` `{time}` |
 | permission | `{tool}`（工具名） `{reason}`（申请原因，可为空） |
 | question | `{header}` `{question}` `{options}`（`  · label — description` 缩进列表）；多问题框架模板另含 `{questions}`（逐项渲染结果），逐项模板含 `{number}` |
 | error | `{errorLabel}`（`code` 或 `code (HTTP status)`） `{errorCode}` `{errorStatus}` `{errorMessage}` `{turn}` |
@@ -165,7 +170,23 @@ Schemastery 对嵌套对象自动补字段默认值并响亮拒绝非法值（�
 | stall | `{stalledMin}`（停滞整分钟数） |
 | goodbye | `{time}` |
 
-渲染规则：未知 `{var}` → 空；当 `{options}` 为空时，仅由 `Options: {options}` 构成的整行自动省略（对齐 opencode-lark-bridge 约定）；行尾空白裁剪、连续空行折叠。
+渲染规则：未知 `{var}` → 空；当 `{options}` 为空时，仅由 `Options: {options}` 构成的整行自动省略（对齐 opencode-lark-bridge 约定）；仅由标签前缀 + 空 `{workspace}` 构成的整行（如 `工作区: {workspace}`）也自动省略；行尾空白裁剪、连续空行折叠。
+
+**工作区/项目信息（0.2.0 新增）**：通知内容加入工作区/项目标识，解决多工作区并行时难以分辨通知归属的问题。`{workspace}` 解析优先级：DSH 工作区注册表（`ctx.workspaceRegistry`，Web 版 bundle 内置）中该会话所属工作区的 `title` → 会话 `header.cwd` 的 basename → 空。注册表与 cwd 都缺省时（极简自定义部署），`工作区: {workspace}` 行整体省略。工作区索引按 `WORKSPACE_REFRESH_INTERVAL_MS`（60s）周期从 `ctx.workspaceRegistry.list()` 重建（内存投影，开销可忽略），引擎 `install` 时立即重建一次。
+
+### 按工作区/项目路由（0.2.0 新增）
+
+**目标**：一个项目一个飞书群，各自通知互不干扰。默认所有工作区共用全局 `target`；显式绑定了路由的工作区走专属目标，未绑定工作区仍走全局目标（通知不丢失）。
+
+**数据模型**：`routing: RoutingEntry[]`，每条 `{ title, path, chatId, userId }`。`title` 是绑定时刻的工作区显示名，`path` 是稳定的匹配键（重命名后 path 不变，路由不中断）。存储于 `lark-notify` 设置命名空间（用户层，设置面板可编辑）与 `config.routing`（部署层默认值）。
+
+**匹配**（`matchRoute`，`src/routing.ts`）：标题精确匹配优先 → 回退路径精确匹配 → 无命中返回 undefined（走全局 target）。绑定用 `upsertRoute`：按 path（再按 title）去重后追加，重绑即覆盖。
+
+**引擎接入**：`PauseEngine` 的 `emit()` 在渲染后调用注入的 `routeResolver(workspaceInfo)`，命中则 `message.target = route`（复用传输层已有的 per-message target 覆盖，`NotificationMessage.target`）。`routeResolver` 在 `index.ts` 里从 `currentSettings().routing` 实时读取，设置面板改动即时生效。
+
+**配置体验（方案 D：命令引导 + 设置面板）**：`/lark-notify route` 在当前会话所属工作区解析出 `{title, path}` 后启动捕获（复用 `SetupController`，独立实例 `routeSetup`）；用户去目标群给机器人发消息，捕获 `chat_id` 后 `upsertRoute` 写入设置并回发确认。设置面板 `routing` 列表可查看/增删改。`/lark-notify status` 显示 route 进度。
+
+**重命名/删除语义**：重命名工作区 → title 失配，path 兜底命中，路由不断；删除工作区 → 会话无注册表归属，但 `header.cwd` 仍命中旧 path 绑定；残留绑定无害（无匹配会话即闲置），设置面板可清理。
 
 ## 5. 发送通道（lark-cli 子进程）
 

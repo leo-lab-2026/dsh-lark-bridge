@@ -5,6 +5,29 @@ Format based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 While the major version is `0`, breaking changes may land in minor releases.
 
+## [0.3.0-beta.0] - 2026-08-17
+
+### Added
+- Workspace/project info in every notification. The default templates now
+  carry a `工作区: {workspace}` line (dropped when the workspace cannot be
+  resolved, so no empty-label noise).
+- New common template variables: `{workspace}`/`{workspaceTitle}`
+  (workspace registry title, falling back to the session `header.cwd`
+  basename), `{workspacePath}` (workspace path, falling back to `cwd`), and
+  `{cwd}` (session working directory).
+- `WorkspaceIndex` (`src/workspace.ts`): an optional, best-effort
+  session → workspace index rebuilt from `ctx.workspaceRegistry.list()` on
+  install and on the periodic engine tick (60s). When the registry is absent
+  (minimal custom profiles), the plugin falls back to `header.cwd`; when both
+  are missing the workspace line is omitted.
+- `/lark-notify status` diagnostics gained the resolved-workspace count.
+- Per-workspace routing (`src/routing.ts`): each workspace can bind its own
+  notification target (one Feishu group per project) via `/lark-notify route`
+  (guided capture: message the bot from the target group) or the `routing`
+  list in the Web settings panel / `config.routing` YAML. Matching prefers the
+  workspace title, then falls back to the path (renames don't break routing);
+  unbound workspaces fall back to the global default target.
+
 ## [0.2.0-beta.1] - 2026-08-17
 
 ### Added
@@ -77,7 +100,8 @@ While the major version is `0`, breaking changes may land in minor releases.
 - Added npm publish metadata (`keywords`, `repository`, `publishConfig`,
   `packageManager`), LICENSE, and release gates (`prepublishOnly`).
 
-[Unreleased]: https://github.com/leo-lab-2026/dsh-lark-bridge/compare/v0.2.0-beta.1...main
+[Unreleased]: https://github.com/leo-lab-2026/dsh-lark-bridge/compare/v0.3.0-beta.0...main
+[0.3.0-beta.0]: https://github.com/leo-lab-2026/dsh-lark-bridge/releases/tag/v0.3.0-beta.0
 [0.2.0-beta.1]: https://github.com/leo-lab-2026/dsh-lark-bridge/releases/tag/v0.2.0-beta.1
 [0.1.1-beta.1]: https://github.com/leo-lab-2026/dsh-lark-bridge/releases/tag/v0.1.1-beta.1
 [0.1.0]: https://github.com/leo-lab-2026/dsh-lark-bridge/releases/tag/v0.1.0

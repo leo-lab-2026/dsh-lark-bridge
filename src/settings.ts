@@ -16,6 +16,7 @@ import type { SettingsNamespace, SettingsScope } from '@deepseek-ai/dsh-settings
 import z from '@deepseek-ai/schemastery'
 import type { Config } from './config.js'
 import type { PluginLogger } from './logger.js'
+import type { RoutingEntry } from './routing.js'
 
 // Parity copy of the upstream `settingsNamespace()` helper
 // (@deepseek-ai/dsh-settings): branding a namespace string is a two-line
@@ -39,6 +40,8 @@ export interface LarkNotifyUserSettings {
   chatId: string
   userId: string
   dryRun: boolean
+  /** Per-workspace target overrides (title + path → chatId/userId). */
+  routing: RoutingEntry[]
 }
 
 /** Schema rendered by the Web settings panel and validated on every write. */
@@ -46,12 +49,19 @@ export const LarkNotifyUserSettingsSchema: z<LarkNotifyUserSettings> = z.object(
   chatId: z.string().default(''),
   userId: z.string().default(''),
   dryRun: z.boolean().default(false),
+  routing: z.array(z.object({
+    title: z.string().default(''),
+    path: z.string().default(''),
+    chatId: z.string().default(''),
+    userId: z.string().default(''),
+  })).default([]),
 })
 
 /** Live runtime facts the settings layer resolves (base + user). */
 export interface LarkNotifyRuntimeSettings {
   target: { chatId: string; userId: string }
   dryRun: boolean
+  routing: readonly RoutingEntry[]
 }
 
 export interface InstalledUserSettings {
@@ -74,6 +84,7 @@ export function installUserSettings(
   const runtime: LarkNotifyRuntimeSettings = {
     target: { chatId: config.target.chatId, userId: config.target.userId },
     dryRun: config.dryRun,
+    routing: config.routing,
   }
   // Mutable holder: the inject callback runs asynchronously after this
   // function returns, so a plain captured variable would freeze at undefined.
@@ -82,6 +93,7 @@ export function installUserSettings(
   const applyResolved = (resolved: LarkNotifyUserSettings): void => {
     runtime.target = { chatId: resolved.chatId, userId: resolved.userId }
     runtime.dryRun = resolved.dryRun
+    runtime.routing = resolved.routing
   }
 
   ctx.inject(['settings'], (settingsCtx) => {
@@ -93,6 +105,7 @@ export function installUserSettings(
           chatId: config.target.chatId,
           userId: config.target.userId,
           dryRun: config.dryRun,
+          routing: config.routing,
         },
         applies: 'live',
       },
@@ -103,7 +116,8 @@ export function installUserSettings(
       const targetText = next.chatId !== '' ? `chatId=${next.chatId}`
         : next.userId !== '' ? `userId=${next.userId}`
           : 'target cleared'
-      logger.info(`[dsh-lark-notify] settings updated: ${targetText}${next.dryRun ? ' [dry-run]' : ''}`)
+      logger.info(`[dsh-lark-notify] settings updated: ${targetText}${next.dryRun ? ' [dry-run]' : ''}`
+        + `${next.routing.length > 0 ? `, routing: ${next.routing.length} 条` : ''}`)
     })
   })
 

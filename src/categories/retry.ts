@@ -15,7 +15,7 @@
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-llm-retry'
-import { renderTemplate } from '../render.js'
+import { renderTemplate, WORKSPACE_DROP_RULE } from '../render.js'
 import { makeIdempotencyKey } from '../transport/lark-cli.js'
 import type { Category, CategoryEngine, SessionRef } from './types.js'
 
@@ -45,7 +45,7 @@ export const retryCategory: Category = {
         errorStatus: hasStatus ? `HTTP ${failure.status}` : '',
         errorMessage: failure.message,
         turn: data.turn,
-      }),
+      }, { dropEmptyVarLine: WORKSPACE_DROP_RULE }),
       idempotencyKey: makeIdempotencyKey(['retry', String(session.id), String(data.turn), String(data.step), String(data.retry)]),
     }))
   },

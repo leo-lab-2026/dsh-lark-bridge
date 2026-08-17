@@ -13,7 +13,7 @@
  */
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
-import { renderTemplate } from '../render.js'
+import { renderTemplate, WORKSPACE_DROP_RULE } from '../render.js'
 import { makeIdempotencyKey } from '../transport/lark-cli.js'
 import type { Category, CategoryEngine, SessionRef } from './types.js'
 
@@ -32,7 +32,7 @@ export const errorCategory: Category = {
         errorStatus: hasStatus ? `HTTP ${failure.status}` : '',
         errorMessage: failure.message,
         turn: event.data.turn,
-      }),
+      }, { dropEmptyVarLine: WORKSPACE_DROP_RULE }),
       idempotencyKey: makeIdempotencyKey(['error', String(session.id), String(event.data.turn)]),
     }))
   },

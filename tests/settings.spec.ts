@@ -35,6 +35,7 @@ describe('installUserSettings', () => {
     expect(installed.current()).toEqual({
       target: { chatId: 'oc_base', userId: '' },
       dryRun: true,
+      routing: [],
     })
   })
 
@@ -44,6 +45,7 @@ describe('installUserSettings', () => {
     expect(installed.current()).toEqual({
       target: { chatId: 'oc_user', userId: '' },
       dryRun: false,
+      routing: [],
     })
     await installed.scope!.update({ dryRun: true })
     expect(installed.current().dryRun).toBe(true)
@@ -58,6 +60,7 @@ describe('installUserSettings', () => {
     expect(installed.current()).toEqual({
       target: { chatId: 'oc_only', userId: '' },
       dryRun: false,
+      routing: [],
     })
   })
 })

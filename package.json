@@ -1,6 +1,6 @@
 {
   "name": "dsh-lark-bridge",
-  "version": "0.2.0-beta.1",
+  "version": "0.3.0-beta.0",
   "description": "DeepSeek Harness plugin: real-time Feishu/Lark notifications when a DSH session pauses for user interaction (permission asks, questions, fatal errors).",
   "license": "MIT",
   "type": "module",

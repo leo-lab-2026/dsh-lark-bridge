@@ -135,6 +135,39 @@ lark-cli event consume im.message.receive_v1 --max-events 1 --timeout 60s
 - 真实触发：让模型执行一个需要审批的操作 / 调用 `ask_user_question` / 制造一次模型错误 / 完成任务 / 制造重试退避，飞书应收到对应通知；
 - 想一次触发全部场景（提问/权限/完成/停滞/中止反例等）：把 [docs/11-notify-test-script.md](./docs/11-notify-test-script.md) 的测试脚本粘贴给 DSH，按对照表逐条核对。
 
+## 按工作区/项目路由通知（可选）
+
+一个项目对应一个飞书群时，可以让**每个工作区的通知发到各自的群**，互不干扰。默认所有工作区共用全局通知目标（方式 A/B/C 配置的那个）；只有显式绑定了路由的工作区才走专属目标。
+
+**绑定（推荐，零 YAML）**：在**目标工作区对应的 DSH 会话里**输入：
+
+```
+/lark-notify route
+```
+
+然后去**目标飞书群**给机器人发送任意一条消息（机器人需先被拉进该群；默认 3 分钟窗口）。插件捕获该群的 `chat_id`，自动绑定「当前工作区 → 该群」，并回发一条测试通知确认。多工作区各绑一次即可；重新绑定同一工作区即覆盖。
+
+**管理**：打开 DSH 设置 → 「lark-notify」分节 → `routing` 列表可查看/增删改每条绑定（`title` 工作区名、`path` 路径、`chatId` 群 id）；`/lark-notify status` 显示 route 进度。
+
+**YAML 部署层（CI/批量）**：在 `cordis.patch.yml` 写死映射：
+
+```yaml
+- id: dsh-lark-notify
+  name: 'dsh-lark-bridge'
+  config:
+    routing:
+      - title: '项目 A'          # 工作区显示名
+        path: '/srv/projects/a'  # 工作区路径（重命名后仍按此匹配）
+        chatId: 'oc_xxx_a'
+        userId: ''
+      - title: '项目 B'
+        path: '/srv/projects/b'
+        chatId: 'oc_xxx_b'
+        userId: ''
+```
+
+**匹配规则**：按工作区标题精确匹配优先，标题对不上时回退按路径匹配——因此**重命名工作区不会断路由**（路径不变）；**删除工作区**后会话仍会通过 `cwd` 路径命中旧绑定，直到你手动清理。**未绑定目标的工作区走全局默认目标**，通知不丢失。
+
 ## 进程死亡看门狗（可选）
 
 进程内观察者无法报告自己的死亡（OOM/崩溃/断电/误杀）。开启插件心跳 + 进程外监督者即可覆盖：
@@ -163,7 +196,11 @@ node scripts/lark-watchdog.mjs --heartbeat-file /tmp/dsh-heartbeat --stale-ms 60
 
 完整配置项、模板变量、每类别开关见 [docs/09-notify-plugin.md](./docs/09-notify-plugin.md)。
 
-模板变量：公共 `{sessionId} {sessionTitle} {webUrl} {time}`；permission `{tool} {reason}`；question `{header} {question} {options} {questions} {number}`；error `{errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}`；complete `{turn}`；stop:blocked `{turn} {reason}`；stop:max-tokens `{turn}`；stop:aborted `{turn} {cancelCause}`；stop:interrupted `{turn}`；retry `{retry} {maxRetries} {maxRetriesLabel} {delaySec} {provider} {mode} {errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}`；stall `{stalledMin}`；goodbye `{time}`。当 `{options}` 为空时，仅由 `Options: {options}` 构成的整行自动省略。
+模板变量：公共 `{sessionId} {sessionTitle} {workspace} {workspaceTitle} {workspacePath} {cwd} {webUrl} {time}`；permission `{tool} {reason}`；question `{header} {question} {options} {questions} {number}`；error `{errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}`；complete `{turn}`；stop:blocked `{turn} {reason}`；stop:max-tokens `{turn}`；stop:aborted `{turn} {cancelCause}`；stop:interrupted `{turn}`；retry `{retry} {maxRetries} {maxRetriesLabel} {delaySec} {provider} {mode} {errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}`；stall `{stalledMin}`；goodbye `{time}`。当 `{options}` 为空时，仅由 `Options: {options}` 构成的整行自动省略；`工作区: {workspace}` 在无法解析出工作区/项目时整行省略（避免空标签噪音）。
+
+**工作区/项目信息**：通知首行默认显示 `工作区: {workspace}`（DSH 工作区名称，或回退为会话工作目录的目录名），帮助在多个工作区/项目并行工作时一眼分辨通知属于哪个项目。解析优先级：DSH 工作区注册表标题（`ctx.workspaceRegistry`，Web 版内置）→ 会话 `header.cwd` 的 basename → 无（该行省略）。`{workspaceTitle}` 与 `{workspace}` 相同，`{workspacePath}` 为工作区路径（或 cwd），`{cwd}` 为会话工作目录。
+
+**按工作区路由**：`routing` 数组（每条含 `title`/`path`/`chatId`/`userId`）把指定工作区的通知定向到专属目标；按标题精确匹配、回退路径匹配；未命中走全局 `target`。用 `/lark-notify route` 或设置面板绑定，详见上文「按工作区/项目路由通知」。
 
 ## 常见问题
 
@@ -172,6 +209,7 @@ node scripts/lark-watchdog.mjs --heartbeat-file /tmp/dsh-heartbeat --stale-ms 60
 | `status` 显示「无法执行 lark-cli」 | `npx @larksuite/cli@latest install`；若二进制不在 PATH，在 config 里设置 `bin` 绝对路径 |
 | `status` 显示 bot 不可用 | `lark-cli config init` 重新配置应用凭据（App ID/Secret） |
 | setup 窗口内没捕获到消息 | 确认开发者后台已开通 `im.message.receive_v1` 事件订阅，且已授予 `im:message.p2p_msg:readonly`；再给机器人发一次消息重试 |
+| `/lark-notify route` 群里发消息没反应 | 机器人需先被拉进该群；确认开发者后台事件订阅包含群消息（`im.message.receive_v1` 的群聊场景），且机器人具备在群内收发消息权限 |
 | 发送失败（`status` 的最近错误） | 错误信息含飞书 error 信封与 hint：常见为缺 scope（`im:message`/`im:message:send_as_bot`）或机器人不在会话中 |
 | 飞书提示「Bot can NOT be out of the chat」 | 该 chat_id 不属于机器人可发送的会话；用方式 A/B 重新获取正确的 p2p chat_id |
 

@@ -9,7 +9,7 @@
 
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-user-approval'
-import { renderTemplate } from '../render.js'
+import { renderTemplate, WORKSPACE_DROP_RULE } from '../render.js'
 import { makeIdempotencyKey } from '../transport/lark-cli.js'
 import type { Category, CategoryEngine, SessionRef } from './types.js'
 
@@ -25,7 +25,7 @@ export const permissionCategory: Category = {
           ...engine.commonVars(session),
           tool: asked.toolName,
           reason: asked.reason ?? '',
-        }),
+        }, { dropEmptyVarLine: WORKSPACE_DROP_RULE }),
         idempotencyKey: makeIdempotencyKey(['permission', String(session.id), id]),
       }))
       return

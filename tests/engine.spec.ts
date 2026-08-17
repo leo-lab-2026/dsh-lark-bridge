@@ -1,5 +1,5 @@
 import { Context } from '@deepseek-ai/cordis'
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import { describe, expect, it } from 'vitest'
 import type { Config } from '../src/config.js'
 import { PauseEngine } from '../src/engine.js'
@@ -11,6 +11,8 @@ import {
   createNotifierStub,
   emitAgentStatus,
   llmRetryEvent,
+  makeSession,
+  makeWorkspaceRegistry,
   sessionId,
   sessionTitleEvent,
   testConfig,
@@ -25,15 +27,32 @@ import {
   updateGoalBlockedEvent,
 } from './helpers.js'
 
-function createHarness(configOverrides: Partial<Config> = {}, now: () => number = () => 0) {
+function createHarness(
+  configOverrides: Partial<Config> = {},
+  now: () => number = () => 0,
+  options: {
+    session?: { id: SessionId; header?: { cwd?: string } }
+    workspaceRegistry?: () => unknown
+    routeResolver?: (workspace: { title: string; path: string } | undefined) => { chatId?: string; userId?: string } | undefined
+  } = {},
+) {
   const ctx = new Context()
   const config = testConfig(configOverrides)
   const logger = createLogger()
   const { notifier, messages } = createNotifierStub()
   const timers = createFakeTimers()
-  const engine = new PauseEngine({ config, notifier, logger, timeout: timers.timeout, interval: timers.interval, now })
+  const engine = new PauseEngine({
+    config,
+    notifier,
+    logger,
+    timeout: timers.timeout,
+    interval: timers.interval,
+    now,
+    workspaceRegistry: options.workspaceRegistry as never,
+    ...(options.routeResolver !== undefined ? { routeResolver: options.routeResolver } : {}),
+  })
   engine.install(ctx)
-  const session = { id: sessionId('s1') } as Session
+  const session = (options.session ?? { id: sessionId('s1') }) as Session
   const emit = (event: SessionEvent): void => { ctx.emit('session/event', session, event) }
   return { ctx, engine, logger, messages, timers, session, emit }
 }
@@ -175,6 +194,114 @@ describe('PauseEngine switches and containment', () => {
     expect(engine.pendingCount()).toBe(1)
     emit(sessionTitleEvent('T'))
     expect(engine.watchedSessionCount()).toBe(1)
+  })
+})
+
+describe('PauseEngine workspace/project info', () => {
+  it('includes the workspace title from the registry in notifications', () => {
+    const { emit, timers, messages } = createHarness(
+      {},
+      () => 0,
+      { workspaceRegistry: makeWorkspaceRegistry([{ title: 'Alpha Project', path: '/home/u/alpha', sessionIds: ['s1'] }]) },
+    )
+    emit(approvalAskedEvent('req-1'))
+    timers.fireAll()
+    expect(messages[0]!.text).toContain('工作区: Alpha Project')
+  })
+
+  it('falls back to the session cwd basename when no registry is available', () => {
+    const { emit, timers, messages } = createHarness(
+      {
+        categories: {
+          ...testConfig().categories,
+          permission: { enabled: true, template: '🔔 权限\n工作区: {workspace}\n路径: {workspacePath}\ncwd: {cwd}' },
+        },
+      },
+      () => 0,
+      { session: makeSession('s1', '/home/user/projects/beta') },
+    )
+    emit(approvalAskedEvent('req-1'))
+    timers.fireAll()
+    expect(messages[0]!.text).toContain('工作区: beta')
+    expect(messages[0]!.text).toContain('路径: /home/user/projects/beta')
+    expect(messages[0]!.text).toContain('cwd: /home/user/projects/beta')
+  })
+
+  it('prefers the registry workspace title over the cwd basename', () => {
+    const { emit, timers, messages } = createHarness(
+      {},
+      () => 0,
+      {
+        session: makeSession('s1', '/home/user/projects/beta'),
+        workspaceRegistry: makeWorkspaceRegistry([{ title: 'Renamed Project', path: '/home/user/projects/beta', sessionIds: ['s1'] }]),
+      },
+    )
+    emit(approvalAskedEvent('req-1'))
+    timers.fireAll()
+    expect(messages[0]!.text).toContain('工作区: Renamed Project')
+    expect(messages[0]!.text).not.toContain('工作区: beta')
+  })
+
+  it('drops the workspace line when neither registry nor cwd is known', () => {
+    const { emit, timers, messages } = createHarness()
+    emit(approvalAskedEvent('req-1'))
+    timers.fireAll()
+    expect(messages[0]!.text).not.toContain('工作区:')
+  })
+
+  it('exposes workspace count diagnostics', () => {
+    const { engine } = createHarness(
+      {},
+      () => 0,
+      { workspaceRegistry: makeWorkspaceRegistry([{ title: 'Alpha', path: '/home/u/alpha', sessionIds: ['s1'] }]) },
+    )
+    expect(engine.workspaceCount()).toBe(1)
+  })
+})
+
+describe('PauseEngine per-workspace routing', () => {
+  it('attaches the routed target when a route matches the workspace', () => {
+    const { emit, timers, messages } = createHarness(
+      {},
+      () => 0,
+      {
+        workspaceRegistry: makeWorkspaceRegistry([{ title: 'Alpha', path: '/home/u/alpha', sessionIds: ['s1'] }]),
+        routeResolver: (workspace) => workspace?.title === 'Alpha' ? { chatId: 'oc_alpha_group' } : undefined,
+      },
+    )
+    emit(approvalAskedEvent('req-1'))
+    timers.fireAll()
+    const sent = messages[0] as unknown as { text: string; target?: { chatId?: string; userId?: string } }
+    expect(sent.target).toEqual({ chatId: 'oc_alpha_group' })
+  })
+
+  it('falls back to the default target when no route matches', () => {
+    const { emit, timers, messages } = createHarness(
+      {},
+      () => 0,
+      {
+        routeResolver: () => undefined,
+      },
+    )
+    emit(approvalAskedEvent('req-1'))
+    timers.fireAll()
+    const sent = messages[0] as unknown as { text: string; target?: { chatId?: string; userId?: string } }
+    expect(sent.target).toBeUndefined()
+  })
+
+  it('uses the cwd fallback workspace for routing when the registry is absent', () => {
+    const { emit, timers, messages } = createHarness(
+      {},
+      () => 0,
+      {
+        session: makeSession('s1', '/home/user/projects/beta'),
+        routeResolver: (workspace) => workspace?.title === 'beta' ? { chatId: 'oc_beta_group' } : undefined,
+      },
+    )
+    emit(approvalAskedEvent('req-1'))
+    timers.fireAll()
+    const sent = messages[0] as unknown as { text: string; target?: { chatId?: string; userId?: string } }
+    expect(sent.target).toEqual({ chatId: 'oc_beta_group' })
   })
 })
 

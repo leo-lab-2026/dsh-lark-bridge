@@ -87,6 +87,18 @@ describe('dsh-lark-bridge plugin wiring', () => {
     await ctx.fiber.dispose()
   })
 
+  it('adds the workspace line derived from the session header cwd', async () => {
+    const logPath = tempLogPath()
+    const { ctx } = await createRuntime(logPath)
+    const session = { id: sessionId('s1'), header: { cwd: '/home/user/projects/alpha' } } as Session
+    ctx.emit('session/event', session, approvalAskedEvent('req-1', 'bash'))
+    await vi.advanceTimersByTimeAsync(600)
+    vi.useRealTimers()
+    const content = await waitForLog(logPath, '工作区: alpha')
+    expect(content).toContain('alpha')
+    await ctx.fiber.dispose()
+  })
+
   it('stays silent when the approval is answered within the grace window', async () => {
     const logPath = tempLogPath()
     const { ctx, session } = await createRuntime(logPath)

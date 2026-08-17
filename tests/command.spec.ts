@@ -25,9 +25,11 @@ const HUMAN_EVENT = JSON.stringify({
 
 interface Runtime {
   definition: CommandDefinition
-  handler: (rawInput: string) => Promise<{ kind: 'success' | 'error'; text?: string }>
+  handler: (rawInput: string, agent?: unknown) => Promise<{ kind: 'success' | 'error'; text?: string }>
   ctx: Context
   setup: SetupController
+  routeSetup: SetupController
+  routeBind: { workspace: { title: string; path: string } | undefined }
   state: { target: { chatId: string; userId: string }; dryRun: boolean }
 }
 
@@ -57,6 +59,8 @@ async function createRuntime(options: { targetChatId?: string; dryRun?: boolean 
     watchedSessionCount: () => 0,
     idleWaitCount: () => 0,
     trackedSessionCount: () => 0,
+    workspaceCount: () => 0,
+    workspaceInfoOf: () => ({ title: 'Alpha', path: '/home/u/alpha' }),
     enabled: () => true,
   } as unknown as PauseEngine
   const onCaptured = vi.fn(async (_message: unknown) => {})
@@ -67,6 +71,14 @@ async function createRuntime(options: { targetChatId?: string; dryRun?: boolean 
     logger,
     onCaptured,
   })
+  const routeSetup = new SetupController({
+    bin: fixture,
+    identity: 'bot',
+    captureTimeoutMs: 10_000,
+    logger,
+    onCaptured,
+  })
+  const routeBind = { workspace: undefined as { title: string; path: string } | undefined }
   const config = testConfig({ bin: fixture })
   const registered: CommandDefinition[] = []
   ctx.provide('commands', {
@@ -75,13 +87,13 @@ async function createRuntime(options: { targetChatId?: string; dryRun?: boolean 
       return () => {}
     },
   })
-  registerDebugCommand(ctx, { config, engine, notifier: transport, transport, setup, logger })
+  registerDebugCommand(ctx, { config, engine, notifier: transport, transport, setup, routeSetup, routeBind, logger })
   const definition = registered.find(item => item.name === 'lark-notify')!
-  const handler = async (rawInput: string) => {
-    const invocation = { rawInput, agent: {}, signal: new AbortController().signal } as unknown as CommandInvocation
+  const handler = async (rawInput: string, agent: unknown = {}) => {
+    const invocation = { rawInput, agent, signal: new AbortController().signal } as unknown as CommandInvocation
     return await definition.handler(invocation) as { kind: 'success' | 'error'; text?: string }
   }
-  return { ctx, definition, handler, setup, state }
+  return { definition, handler, ctx, setup, routeSetup, routeBind, state }
 }
 
 describe('/lark-notify status', () => {
@@ -146,5 +158,42 @@ describe('/lark-notify setup', () => {
     expect(setup.status()).toMatchObject({ state: 'success', chatId: 'oc_chat_1' })
     const status = await handler('status')
     expect(status.text).toContain('已完成')
+  })
+})
+
+describe('/lark-notify route', () => {
+  it('refuses when the current session resolves to no workspace', async () => {
+    vi.stubEnv('FAKE_LARK_CLI_MODE', 'auth-status')
+    const { definition, ctx } = await createRuntime()
+    // Override engine.workspaceInfoOf via a wrapper is awkward here; instead
+    // call with an agent whose session is absent → command cannot resolve.
+    const invocation = {
+      rawInput: 'route',
+      agent: { session: undefined },
+      signal: new AbortController().signal,
+    } as unknown as CommandInvocation
+    const result = await definition.handler(invocation) as { kind: 'success' | 'error'; text?: string }
+    vi.unstubAllEnvs()
+    expect(result.kind).toBe('error')
+    expect(result.text).toContain('无法确定当前会话')
+    await ctx.fiber.dispose()
+  })
+
+  it('starts a background capture and binds the workspace on completion', async () => {
+    vi.stubEnv('FAKE_LARK_CLI_MODE', 'consume')
+    vi.stubEnv('FAKE_LARK_EVENT', HUMAN_EVENT)
+    const { handler, routeSetup, routeBind } = await createRuntime()
+    const agent = { session: { id: 's1', header: { cwd: '/home/u/alpha' } } }
+    const started = await handler('route', agent)
+    expect(started.kind).toBe('success')
+    expect(started.text).toContain('Alpha')
+    expect(routeBind.workspace).toEqual({ title: 'Alpha', path: '/home/u/alpha' })
+
+    const deadline = Date.now() + 5_000
+    while (Date.now() < deadline && routeSetup.status().state === 'listening') {
+      await new Promise(resolve => setTimeout(resolve, 25))
+    }
+    vi.unstubAllEnvs()
+    expect(routeSetup.status()).toMatchObject({ state: 'success', chatId: 'oc_chat_1' })
   })
 })
