@@ -132,7 +132,8 @@ lark-cli event consume im.message.receive_v1 --max-events 1 --timeout 60s
 
 - `/lark-notify test 你好` → 飞书收到测试通知；
 - `/lark-notify status` → 一键诊断：通知目标、lark-cli 存在性与认证状态、发送统计、启用的通知类别、setup 进度与可执行提示；
-- 真实触发：让模型执行一个需要审批的操作 / 调用 `ask_user_question` / 制造一次模型错误 / 完成任务 / 制造重试退避，飞书应收到对应通知。
+- 真实触发：让模型执行一个需要审批的操作 / 调用 `ask_user_question` / 制造一次模型错误 / 完成任务 / 制造重试退避，飞书应收到对应通知；
+- 想一次触发全部场景（提问/权限/完成/停滞/中止反例等）：把 [docs/11-notify-test-script.md](./docs/11-notify-test-script.md) 的测试脚本粘贴给 DSH，按对照表逐条核对。
 
 ## 进程死亡看门狗（可选）
 

@@ -181,6 +181,8 @@ lark-cli im +messages-send --chat-id <oc_…> --as bot --text "<消息>" \
 
 ## 6. 调试与验证清单
 
+> 想一次触发全部场景？把 [11-notify-test-script.md](./11-notify-test-script.md) 的脚本粘贴给 DSH，逐条核对飞书通知（含宽限/节流等静默条件的说明）。
+
 - [ ] `lark-cli auth status --json --verify`：bot ready；`lark-cli im +messages-send --dry-run` 验证命令形态
 - [ ] `dsh --profile <name> --dump-config`：`dsh-lark-notify` 行存在、config 生效
 - [ ] `/lark-notify status`：目标、lark-cli 认证、发送统计、启用的通知类别、setup 状态与可执行提示

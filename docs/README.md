@@ -28,6 +28,8 @@
 | [07-lark-sdk-ecosystem.md](./07-lark-sdk-ecosystem.md) | 官方 SDK 生态：node-sdk、Go/Python/Java、lark-mcp，四种接入路径对比与关键坑 | 选型阶段 |
 | [08-lark-dsh-plugin-plan.md](./08-lark-dsh-plugin-plan.md) | **DSH 集成方案**：五种方案对比（推荐 lark-cli 子进程桥 + skills vendor）、消息桥设计（收→处理→回）、会话映射、配置 schema、安全、打包分发、路线图与验证清单 | 开发 dsh-lark-bridge 的人 |
 | [09-notify-plugin.md](./09-notify-plugin.md) | **停顿通知插件实现设计**（本仓库代码）：停顿检测模型（permission/question/error + Phase 2A 的 complete/stop 族/retry/stall/goodbye/watchdog）、grace 竞态与 idle 宽限、架构与两条接缝（Category/Notifier）、配置 schema、模板变量、调试清单、Phase 2A/2B/2C 路线图 | 开发/使用 dsh-lark-bridge 的人 |
+| [10-publish-checklist.md](./10-publish-checklist.md) | **发布手册**（维护者）：渠道决策、发布前门禁、npm 发布流程、GitHub Release、版本与回滚政策、安全清单、发布记录 | 维护者 |
+| [11-notify-test-script.md](./11-notify-test-script.md) | **通知测试脚本**：可直接粘贴给 DSH 的测试脚本，逐步触发各类停顿/停机场景（提问、权限、完成、停滞、中止反例等），附预期通知对照表、静默条件排查与进阶配方（stop:blocked/max-tokens/retry/error/watchdog） | 使用/验收 dsh-lark-bridge 的人 |
 
 ## 核心结论（TL;DR）
 
