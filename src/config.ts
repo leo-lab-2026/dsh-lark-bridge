@@ -5,10 +5,19 @@
  * fail loudly at load time (Cordis config validation).
  *
  * Template variables (per category, see docs/09 for the full table):
- *   common:       {sessionId} {sessionTitle} {webUrl} {time}
- *   permission:   {tool} {reason}
- *   question:     {header} {question} {options} {questions} {number}
- *   error:        {errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}
+ *   common:          {sessionId} {sessionTitle} {webUrl} {time}
+ *   permission:      {tool} {reason}
+ *   question:        {header} {question} {options} {questions} {number}
+ *   error:           {errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}
+ *   complete:        {turn}
+ *   stop:blocked:    {turn} {reason}
+ *   stop:max-tokens: {turn}
+ *   stop:aborted:    {turn} {cancelCause}
+ *   stop:interrupted:{turn}
+ *   retry:           {retry} {maxRetries} {maxRetriesLabel} {delaySec} {provider}
+ *                    {mode} {errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}
+ *   stall:           {stalledMin}
+ *   goodbye:         {time}
  * @module dsh-lark-bridge/config
  */
 
@@ -38,6 +47,54 @@ export interface ErrorCategoryConfig extends CategoryConfig {
   throttleMs: number
 }
 
+/**
+ * complete category: task-finished notification. Triggered by the Phase 2A
+ * idle model (`agent/status` → `idle` persisting past `idleGraceMs` while the
+ * last `turn/end` is `completed`), throttled per session.
+ */
+export interface CompleteCategoryConfig extends CategoryConfig {
+  /** Idle grace window (ms): the agent must stay idle this long (filtering goal auto-rounds) before notifying. */
+  idleGraceMs: number
+  /** Per-session throttle (ms) between consecutive completion notifications. */
+  throttleMs: number
+}
+
+/** stop category family member (blocked / max-tokens / aborted / interrupted). */
+export interface StopCategoryConfig extends CategoryConfig {
+  /** Per-session throttle (ms) between consecutive notifications of this kind. */
+  throttleMs: number
+}
+
+/** retry category: request-backoff notifications with an attempt threshold and interval throttle. */
+export interface RetryCategoryConfig extends CategoryConfig {
+  /** Minimum `llm/retry` attempt number that triggers a notification. */
+  retryThreshold: number
+  /** Per-session interval (ms) between consecutive retry reminders. */
+  intervalMs: number
+}
+
+/** stall category: no-progress scanning while the agent stays running. */
+export interface StallCategoryConfig extends CategoryConfig {
+  /** Milliseconds of zero session activity while running that count as a stall. */
+  stallMs: number
+  /** Repeat-reminder window (ms) while the stall persists. */
+  repeatMs: number
+}
+
+/** Normal-exit farewell notification sent from the plugin dispose hook. */
+export interface GoodbyeConfig {
+  enabled: boolean
+  template: string
+}
+
+/** Process-death watchdog: in-process heartbeat file for an external supervisor. */
+export interface WatchdogConfig {
+  enabled: boolean
+  /** Heartbeat file path (touched every `intervalMs`); empty = watchdog off. */
+  heartbeatFile: string
+  intervalMs: number
+}
+
 /** Complete validated plugin configuration. */
 export interface Config {
   target: NotificationTarget
@@ -57,10 +114,21 @@ export interface Config {
   dryRun: boolean
   /** `/lark-notify setup` listen window (ms) for capturing the user's first message. */
   setupTimeoutMs: number
+  /** Normal-exit farewell notification (skipped on plugin reload/HMR). */
+  goodbye: GoodbyeConfig
+  /** Process-death watchdog heartbeat writer. */
+  watchdog: WatchdogConfig
   categories: {
     permission: CategoryConfig
     question: QuestionCategoryConfig
     error: ErrorCategoryConfig
+    complete: CompleteCategoryConfig
+    'stop:blocked': StopCategoryConfig
+    'stop:max-tokens': StopCategoryConfig
+    'stop:aborted': StopCategoryConfig
+    'stop:interrupted': StopCategoryConfig
+    retry: RetryCategoryConfig
+    stall: StallCategoryConfig
   }
 }
 
@@ -69,6 +137,17 @@ export const DEFAULT_QUESTION_TEMPLATE = '❓ DSH 正在等待你的回答\n会�
 export const DEFAULT_QUESTION_TEMPLATE_MULTIPLE = '❓ DSH 正在等待你的回答\n会话: {sessionTitle} ({sessionId})\n\n{questions}\n→ {webUrl}'
 export const DEFAULT_QUESTION_ITEM_TEMPLATE = '{number}. {header}\n   {question}\n   Options: {options}'
 export const DEFAULT_ERROR_TEMPLATE = '⚠️ DSH 会话出错停止\n会话: {sessionTitle} ({sessionId})\n错误: [{errorLabel}]\n详情: {errorMessage}\n→ {webUrl}'
+export const DEFAULT_COMPLETE_TEMPLATE = '✅ DSH 任务完成\n会话: {sessionTitle} ({sessionId})\n轮次: {turn}\n→ {webUrl}'
+export const DEFAULT_STOP_BLOCKED_TEMPLATE = '🚫 DSH 目标阻塞\n会话: {sessionTitle} ({sessionId})\n原因: {reason}\n→ {webUrl}'
+export const DEFAULT_STOP_MAX_TOKENS_TEMPLATE = '✂️ DSH 输出达到令牌上限\n会话: {sessionTitle} ({sessionId})\n轮次: {turn}\n→ {webUrl}'
+export const DEFAULT_STOP_ABORTED_TEMPLATE = '🛑 DSH 轮次被中止\n会话: {sessionTitle} ({sessionId})\n原因: {cancelCause}\n→ {webUrl}'
+export const DEFAULT_STOP_INTERRUPTED_TEMPLATE = '⚠️ DSH 异常中断的轮次已闭合\n会话: {sessionTitle} ({sessionId})\n轮次: {turn}\n→ {webUrl}'
+export const DEFAULT_RETRY_TEMPLATE = '🔁 DSH 正在重试模型请求\n会话: {sessionTitle} ({sessionId})\n重试: {retry}{maxRetriesLabel}\n退避: {delaySec}s\n错误: [{errorLabel}]\n详情: {errorMessage}\n→ {webUrl}'
+export const DEFAULT_STALL_TEMPLATE = '⏳ DSH 长时间无进展\n会话: {sessionTitle} ({sessionId})\n停滞: {stalledMin} 分钟\n→ {webUrl}'
+export const DEFAULT_GOODBYE_TEMPLATE = '👋 DSH 已正常退出\n时间: {time}'
+
+/** Idle grace window applied to the complete/stop idle model (doc 09 §7.1). */
+export const DEFAULT_IDLE_GRACE_MS = 5_000
 
 /** Runtime schema; Cordis validates `config` against it before `apply()`. */
 export const Config: z<Config> = z.object({
@@ -84,6 +163,15 @@ export const Config: z<Config> = z.object({
   debounceMs: z.number().default(3_000),
   dryRun: z.boolean().default(false),
   setupTimeoutMs: z.number().default(180_000),
+  goodbye: z.object({
+    enabled: z.boolean().default(true),
+    template: z.string().default(DEFAULT_GOODBYE_TEMPLATE),
+  }),
+  watchdog: z.object({
+    enabled: z.boolean().default(false),
+    heartbeatFile: z.string().default(''),
+    intervalMs: z.number().default(5_000),
+  }),
   categories: z.object({
     permission: z.object({
       enabled: z.boolean().default(true),
@@ -99,6 +187,44 @@ export const Config: z<Config> = z.object({
       enabled: z.boolean().default(true),
       template: z.string().default(DEFAULT_ERROR_TEMPLATE),
       throttleMs: z.number().default(300_000),
+    }),
+    complete: z.object({
+      enabled: z.boolean().default(true),
+      template: z.string().default(DEFAULT_COMPLETE_TEMPLATE),
+      idleGraceMs: z.number().default(DEFAULT_IDLE_GRACE_MS),
+      throttleMs: z.number().default(1_800_000),
+    }),
+    'stop:blocked': z.object({
+      enabled: z.boolean().default(true),
+      template: z.string().default(DEFAULT_STOP_BLOCKED_TEMPLATE),
+      throttleMs: z.number().default(300_000),
+    }),
+    'stop:max-tokens': z.object({
+      enabled: z.boolean().default(true),
+      template: z.string().default(DEFAULT_STOP_MAX_TOKENS_TEMPLATE),
+      throttleMs: z.number().default(300_000),
+    }),
+    'stop:aborted': z.object({
+      enabled: z.boolean().default(true),
+      template: z.string().default(DEFAULT_STOP_ABORTED_TEMPLATE),
+      throttleMs: z.number().default(300_000),
+    }),
+    'stop:interrupted': z.object({
+      enabled: z.boolean().default(true),
+      template: z.string().default(DEFAULT_STOP_INTERRUPTED_TEMPLATE),
+      throttleMs: z.number().default(300_000),
+    }),
+    retry: z.object({
+      enabled: z.boolean().default(true),
+      template: z.string().default(DEFAULT_RETRY_TEMPLATE),
+      retryThreshold: z.number().default(2),
+      intervalMs: z.number().default(300_000),
+    }),
+    stall: z.object({
+      enabled: z.boolean().default(true),
+      template: z.string().default(DEFAULT_STALL_TEMPLATE),
+      stallMs: z.number().default(600_000),
+      repeatMs: z.number().default(3_600_000),
     }),
   }),
 })

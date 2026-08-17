@@ -12,10 +12,12 @@ import * as plugin from '../src/index.js'
 import {
   approvalAskedEvent,
   approvalDecidedEvent,
+  emitAgentStatus,
   MemorySettingsProvider,
   sessionId,
   sessionTitleEvent,
   testConfig,
+  turnEndCompletedEvent,
   turnEndErrorEvent,
 } from './helpers.js'
 
@@ -166,6 +168,64 @@ describe('dsh-lark-bridge plugin wiring', () => {
     await ctx.plugin(TimerService)
     await ctx.plugin(plugin, testConfig({ bin: fixtureOk, dryRun: true }))
     // No commands service, empty target: apply() must not throw and must warn.
+    await ctx.fiber.dispose()
+  })
+
+  it('notifies task completion end-to-end after the idle grace window', async () => {
+    const logPath = tempLogPath()
+    const { ctx, session } = await createRuntime(logPath)
+    ctx.emit('session/event', session, turnEndCompletedEvent(2))
+    emitAgentStatus(ctx, sessionId('s1'), 'idle')
+    await vi.advanceTimersByTimeAsync(5_100)
+    vi.useRealTimers()
+    const content = await waitForLog(logPath, '任务完成')
+    expect(content).toContain('oc_test')
+    expect(content).toContain('s1')
+    await ctx.fiber.dispose()
+  })
+
+  it('sends a farewell when the whole tree unloads, but not on a plugin-only reload', async () => {
+    // Plugin-only unload (HMR): the root fiber stays ACTIVE → no farewell.
+    const reloadLog = tempLogPath()
+    vi.stubEnv('FAKE_LARK_LOG', reloadLog)
+    vi.stubEnv('FAKE_LARK_CLI_MODE', 'log')
+    const reloadCtx = new Context()
+    await reloadCtx.plugin(TimerService)
+    const reloadFiber = reloadCtx.plugin(plugin, pluginConfig())
+    await reloadFiber
+    await reloadFiber.dispose()
+    vi.useRealTimers()
+    await new Promise(resolve => setTimeout(resolve, 300))
+    expect(existsSync(reloadLog)).toBe(false)
+    await reloadCtx.fiber.dispose()
+
+    // Whole-tree shutdown: the farewell goes through the transport.
+    vi.useFakeTimers()
+    const shutdownLog = tempLogPath()
+    vi.stubEnv('FAKE_LARK_LOG', shutdownLog)
+    const ctx = new Context()
+    await ctx.plugin(TimerService)
+    await ctx.plugin(plugin, pluginConfig())
+    await ctx.fiber.dispose()
+    vi.useRealTimers()
+    const content = await waitForLog(shutdownLog, '已正常退出')
+    expect(content).toContain('oc_test')
+  })
+
+  it('writes the watchdog heartbeat file on the configured interval', async () => {
+    const heartbeatFile = tempLogPath()
+    const ctx = new Context()
+    await ctx.plugin(TimerService)
+    await ctx.plugin(plugin, testConfig({
+      bin: fixtureOk,
+      goodbye: { enabled: false, template: 'bye' },
+      watchdog: { enabled: true, heartbeatFile, intervalMs: 5_000 },
+    }))
+    const read = (): string => existsSync(heartbeatFile) ? readFileSync(heartbeatFile, 'utf8') : ''
+    await vi.waitFor(() => { expect(read()).not.toBe('') })
+    const first = read()
+    await vi.advanceTimersByTimeAsync(5_100)
+    await vi.waitFor(() => { expect(read()).not.toBe(first) })
     await ctx.fiber.dispose()
   })
 })

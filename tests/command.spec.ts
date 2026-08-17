@@ -55,6 +55,9 @@ async function createRuntime(options: { targetChatId?: string; dryRun?: boolean 
   const engine = {
     pendingCount: () => 0,
     watchedSessionCount: () => 0,
+    idleWaitCount: () => 0,
+    trackedSessionCount: () => 0,
+    enabled: () => true,
   } as unknown as PauseEngine
   const onCaptured = vi.fn(async (_message: unknown) => {})
   const setup = new SetupController({

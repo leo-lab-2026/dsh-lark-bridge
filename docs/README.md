@@ -27,7 +27,7 @@
 | [06-lark-cli.md](./06-lark-cli.md) | 官方 CLI 详解：安装认证、三层命令体系、输出/错误契约、26 个 AI Agent Skills（含与 DSH skill 格式的兼容性）、事件消费子进程契约、安全设计与企业嵌入（extension/sidecar） | 采用 lark-cli 路线的人 |
 | [07-lark-sdk-ecosystem.md](./07-lark-sdk-ecosystem.md) | 官方 SDK 生态：node-sdk、Go/Python/Java、lark-mcp，四种接入路径对比与关键坑 | 选型阶段 |
 | [08-lark-dsh-plugin-plan.md](./08-lark-dsh-plugin-plan.md) | **DSH 集成方案**：五种方案对比（推荐 lark-cli 子进程桥 + skills vendor）、消息桥设计（收→处理→回）、会话映射、配置 schema、安全、打包分发、路线图与验证清单 | 开发 dsh-lark-bridge 的人 |
-| [09-notify-plugin.md](./09-notify-plugin.md) | **停顿通知插件实现设计**（本仓库代码）：停顿检测模型（permission/question/error）、grace 竞态、架构与两条接缝（Category/Notifier）、配置 schema、模板变量、调试清单、Phase 2 路线图 | 开发/使用 dsh-lark-bridge 的人 |
+| [09-notify-plugin.md](./09-notify-plugin.md) | **停顿通知插件实现设计**（本仓库代码）：停顿检测模型（permission/question/error + Phase 2A 的 complete/stop 族/retry/stall/goodbye/watchdog）、grace 竞态与 idle 宽限、架构与两条接缝（Category/Notifier）、配置 schema、模板变量、调试清单、Phase 2A/2B/2C 路线图 | 开发/使用 dsh-lark-bridge 的人 |
 
 ## 核心结论（TL;DR）
 

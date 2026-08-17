@@ -18,12 +18,27 @@ importers:
       '@deepseek-ai/cordis-plugin-timer':
         specifier: link:../deepseek-harness/vendor/timer
         version: link:../deepseek-harness/vendor/timer
+      '@deepseek-ai/dsh-agent':
+        specifier: link:../deepseek-harness/packages/core/agent
+        version: link:../deepseek-harness/packages/core/agent
+      '@deepseek-ai/dsh-brand':
+        specifier: link:../deepseek-harness/packages/util/brand
+        version: link:../deepseek-harness/packages/util/brand
       '@deepseek-ai/dsh-commands':
         specifier: link:../deepseek-harness/packages/interaction/commands
         version: link:../deepseek-harness/packages/interaction/commands
+      '@deepseek-ai/dsh-invariants':
+        specifier: link:../deepseek-harness/packages/runtime-diagnostics/invariants
+        version: link:../deepseek-harness/packages/runtime-diagnostics/invariants
       '@deepseek-ai/dsh-llm':
         specifier: link:../deepseek-harness/packages/llm/llm
         version: link:../deepseek-harness/packages/llm/llm
+      '@deepseek-ai/dsh-llm-retry':
+        specifier: link:../deepseek-harness/packages/llm/llm-retry
+        version: link:../deepseek-harness/packages/llm/llm-retry
+      '@deepseek-ai/dsh-scope':
+        specifier: link:../deepseek-harness/packages/core/scope
+        version: link:../deepseek-harness/packages/core/scope
       '@deepseek-ai/dsh-session':
         specifier: link:../deepseek-harness/packages/core/session
         version: link:../deepseek-harness/packages/core/session
@@ -36,9 +51,18 @@ importers:
       '@deepseek-ai/dsh-settings-file':
         specifier: link:../deepseek-harness/packages/settings/settings-file
         version: link:../deepseek-harness/packages/settings/settings-file
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: link:../deepseek-harness/packages/core/system-prompt
+        version: link:../deepseek-harness/packages/core/system-prompt
+      '@deepseek-ai/dsh-timeout':
+        specifier: link:../deepseek-harness/packages/util/timeout
+        version: link:../deepseek-harness/packages/util/timeout
       '@deepseek-ai/dsh-tools':
         specifier: link:../deepseek-harness/packages/core/tools
         version: link:../deepseek-harness/packages/core/tools
+      '@deepseek-ai/dsh-typert-protocol':
+        specifier: link:../deepseek-harness/packages/typert/protocol
+        version: link:../deepseek-harness/packages/typert/protocol
       '@deepseek-ai/dsh-user-approval':
         specifier: link:../deepseek-harness/packages/interaction/user-approval
         version: link:../deepseek-harness/packages/interaction/user-approval

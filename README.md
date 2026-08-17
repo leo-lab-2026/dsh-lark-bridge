@@ -4,7 +4,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/dsh-lark-bridge?style=flat-square)](https://www.npmjs.com/package/dsh-lark-bridge)
 [![license](https://img.shields.io/npm/l/dsh-lark-bridge?style=flat-square)](./LICENSE)
 
-DeepSeek Harness 插件：当 DSH 会话因**等待使用者交互**而停顿时，实时调用 [lark-cli](https://github.com/larksuite/cli) 发送飞书/Lark 通知，提醒你回到 DSH 继续处理。
+DeepSeek Harness 插件：当 DSH 会话**停止工作**——因等待使用者交互而停顿、任务完成、被阻塞/中止、请求退避、进程停滞，甚至进程死亡——都会实时调用 [lark-cli](https://github.com/larksuite/cli) 发送飞书/Lark 通知，实现「DSH 停止工作 = 必收到通知」的完整覆盖。
 
 ## 功能
 
@@ -13,8 +13,17 @@ DeepSeek Harness 插件：当 DSH 会话因**等待使用者交互**而停顿时
 | 权限申请 | 工具申请审批（如沙箱升级） | 等待审批期间（约 0.5s 宽限期内被秒批则不打扰） |
 | 向用户提问 | 模型调用 `ask_user_question`（含 plan mode 计划评审） | 等待回答期间 |
 | 错误致停 | 轮次以致命错误结束（模型 400/401/403/配额/重试耗尽等 4xx-5xx） | 立即（每会话 5 分钟节流） |
+| 任务完成 | 轮次 `completed` 结束且 agent 进入 idle（5s 宽限期过滤 goal 自动续轮/`/loop`） | idle 宽限后（每会话 30 分钟节流） |
+| 目标阻塞 | `turn/end` `blocked`（goal 阻塞 / 预步骤拒绝；详情取最近 `update_goal` 的 `blocked_reason`） | idle 宽限后 |
+| 令牌上限 | `turn/end` `max-tokens` | idle 宽限后 |
+| 轮次被中止 | `turn/end` `aborted`（`user`/`parent` 抑制；`hook`/`disposed`/`legacy` 通知） | idle 宽限后 |
+| 异常中断闭合 | `turn/end` `interrupted`（崩溃孤儿轮在重载时闭合） | idle 宽限后 |
+| 请求退避 | `llm/retry` 事件达到重试阈值（默认第 2 次起） | 达到阈值即发（每会话 5 分钟节流） |
+| 无进展停滞 | agent 保持 `running` 但长时间无任何事件（默认 10 分钟判定） | 判定即发（默认 60 分钟重复提醒） |
+| 正常退出 | 插件 dispose（仅整个应用树卸载时，HMR/重载不误报） | 退出时告别通知 |
+| 进程死亡 | 进程外监督者：插件写心跳文件，`scripts/lark-watchdog.mjs` 检测心跳丢失 | 心跳超时即发 |
 
-插件是纯只读观察者：只监听 DSH 持久事件流，不拦截任何执行链、不代答任何审批/提问；lark-cli 缺失或发送失败时 fail-soft（只告警、绝不影响 DSH）。
+插件是纯只读观察者：只监听 DSH 持久事件流与 `agent/status` 生命周期，不拦截任何执行链、不代答任何审批/提问；lark-cli 缺失或发送失败时 fail-soft（只告警、绝不影响 DSH）。所有类别独立开关，默认全部开启（噪音由宽限窗口与节流控制）。
 
 ## 安装
 
@@ -80,14 +89,38 @@ lark-cli event consume im.message.receive_v1 --max-events 1 --timeout 60s
 ### 3. 验证
 
 - `/lark-notify test 你好` → 飞书收到测试通知；
-- `/lark-notify status` → 一键诊断：通知目标、lark-cli 存在性与认证状态、发送统计、setup 进度与可执行提示；
-- 真实触发：让模型执行一个需要审批的操作 / 调用 `ask_user_question` / 制造一次模型错误，飞书应收到对应通知。
+- `/lark-notify status` → 一键诊断：通知目标、lark-cli 存在性与认证状态、发送统计、启用的通知类别、setup 进度与可执行提示；
+- 真实触发：让模型执行一个需要审批的操作 / 调用 `ask_user_question` / 制造一次模型错误 / 完成任务 / 制造重试退避，飞书应收到对应通知。
+
+## 进程死亡看门狗（可选）
+
+进程内观察者无法报告自己的死亡（OOM/崩溃/断电/误杀）。开启插件心跳 + 进程外监督者即可覆盖：
+
+```yaml
+# cordis.patch.yml（或作为部署层 config 覆盖）
+config:
+  watchdog:
+    enabled: true
+    heartbeatFile: '/tmp/dsh-heartbeat'   # 插件每 5s 更新一次
+```
+
+再任选一种方式运行监督者脚本：
+
+```sh
+# 常驻模式（默认每 staleMs/4 检查一次）
+node scripts/lark-watchdog.mjs --heartbeat-file /tmp/dsh-heartbeat --stale-ms 60000 --chat-id oc_xxx
+
+# 定时任务模式（cron / systemd timer 每 30s 跑一次）
+node scripts/lark-watchdog.mjs --heartbeat-file /tmp/dsh-heartbeat --stale-ms 60000 --chat-id oc_xxx --once
+```
+
+心跳丢失超过 `stale-ms` 即发「DSH 进程死亡」通知；同一死亡事件按 `--repeat-ms`（默认 60 分钟）去重，状态记录在 `<heartbeat-file>.alerted`。`--once` 退出码：`0` 心跳正常（或重复窗口内抑制）、`2` 已发送告警、`3` 告警发送失败。
 
 ## 配置参考
 
 完整配置项、模板变量、每类别开关见 [docs/09-notify-plugin.md](./docs/09-notify-plugin.md)。
 
-模板变量：公共 `{sessionId} {sessionTitle} {webUrl} {time}`；permission `{tool} {reason}`；question `{header} {question} {options} {questions} {number}`；error `{errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}`。当 `{options}` 为空时，仅由 `Options: {options}` 构成的整行自动省略。
+模板变量：公共 `{sessionId} {sessionTitle} {webUrl} {time}`；permission `{tool} {reason}`；question `{header} {question} {options} {questions} {number}`；error `{errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}`；complete `{turn}`；stop:blocked `{turn} {reason}`；stop:max-tokens `{turn}`；stop:aborted `{turn} {cancelCause}`；stop:interrupted `{turn}`；retry `{retry} {maxRetries} {maxRetriesLabel} {delaySec} {provider} {mode} {errorLabel} {errorCode} {errorStatus} {errorMessage} {turn}`；stall `{stalledMin}`；goodbye `{time}`。当 `{options}` 为空时，仅由 `Options: {options}` 构成的整行自动省略。
 
 ## 常见问题
 
@@ -110,4 +143,4 @@ lark-cli event consume im.message.receive_v1 --max-events 1 --timeout 60s
 
 ## 开发
 
-架构与设计（停顿检测模型、grace 竞态、Category/Notifier 两条接缝、Phase 2 路线图、安全）见 [docs/09-notify-plugin.md](./docs/09-notify-plugin.md)；DSH/Lark 调研背景见 [docs/README.md](./docs/README.md)。
+架构与设计（停顿检测模型、grace 竞态、Category/Notifier 两条接缝、Phase 2A/2B/2C 路线图、安全）见 [docs/09-notify-plugin.md](./docs/09-notify-plugin.md)；DSH/Lark 调研背景见 [docs/README.md](./docs/README.md)。

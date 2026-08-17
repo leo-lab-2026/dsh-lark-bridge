@@ -1,11 +1,23 @@
 /**
  * dsh-lark-bridge — DeepSeek Harness plugin that sends real-time Feishu/Lark
- * notifications when a session pauses for human interaction:
+ * notifications when a DSH session stops working or pauses for human input:
  *
+ * V1 categories (pause detection):
  * - permission — an approval question is pending (`approval/asked`)
  * - question   — the model awaits an ask_user_question answer (`tool/call`)
  * - error      — a turn ended fatally (`turn/end` reason error), including
  *                non-retryable 400-500 model failures
+ *
+ * Phase 2A categories (complete "DSH stopped = always notified"):
+ * - complete   — the agent went idle after a `completed` turn (idle grace
+ *                window filters goal auto-rounds and /loop followups)
+ * - stop:blocked / stop:max-tokens / stop:aborted / stop:interrupted —
+ *                the remaining turn-end reasons, each with its own switch
+ * - retry      — provider backoff (`llm/retry`) from the attempt threshold
+ * - stall      — a running agent stopped producing events (periodic scan)
+ * - goodbye    — "DSH exited normally" farewell from the dispose hook
+ * - watchdog   — in-process heartbeat file for an external process-death
+ *                supervisor (`scripts/lark-watchdog.mjs`)
  *
  * Notification target configuration (public-user friendly):
  *  1. `/lark-notify setup` — guided: listens for one message to the bot and
@@ -15,9 +27,10 @@
  *  3. cordis.yml `config.target` — deployment defaults for CI/power users.
  * Precedence: user settings > cordis.yml config.
  *
- * Pure read-only observation of the durable session event stream: the plugin
- * never intercepts waterfalls, never answers approvals/questions, and never
- * affects harness behavior. Delivery goes through the official lark-cli
+ * Pure read-only observation of the durable session event stream and the
+ * live `agent/status` lifecycle: the plugin never intercepts waterfalls,
+ * never answers approvals/questions, and never affects harness behavior.
+ * Delivery goes through the official lark-cli
  * (`lark-cli im +messages-send … --as bot`), whose credentials are managed
  * by lark-cli itself; every failure is fail-soft.
  *
@@ -25,7 +38,8 @@
  * @module dsh-lark-bridge
  */
 
-import type { Context } from '@deepseek-ai/cordis'
+import { writeFile } from 'node:fs/promises'
+import type { Context, FiberState } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/cordis-plugin-timer'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-session'
@@ -34,6 +48,7 @@ import type {} from '@deepseek-ai/dsh-user-approval'
 import { registerDebugCommand } from './command.js'
 import type { Config as PluginConfig } from './config.js'
 import { PauseEngine } from './engine.js'
+import { renderTemplate } from './render.js'
 import { installUserSettings } from './settings.js'
 import { SetupController } from './setup.js'
 import { LarkCliTransport, makeIdempotencyKey } from './transport/lark-cli.js'
@@ -45,6 +60,13 @@ export const name = 'dsh-lark-notify'
 
 /** Hard dependency: the timer service (base bundle) supplies effect-bound timers. */
 export const inject = ['timer']
+
+/**
+ * `@deepseek-ai/cordis` declares `FiberState` as a const enum — it has no
+ * runtime export, so this numeric mirror is the only inlinable way to test
+ * the root fiber's lifecycle state (see cordis `FiberState.ACTIVE` = 2).
+ */
+const FIBER_STATE_ACTIVE = 2 satisfies FiberState
 
 export function apply(ctx: Context, config: PluginConfig): void {
   const logger = ctx.logger('dsh-lark-notify')
@@ -77,8 +99,49 @@ export function apply(ctx: Context, config: PluginConfig): void {
     notifier: transport,
     logger,
     timeout: (callback, delay) => ctx.timeout(callback, delay),
+    interval: (callback, delay) => ctx.interval(callback, delay),
   })
   engine.install(ctx)
+
+  // Normal-exit farewell: fire only when the WHOLE application tree unloads
+  // (root fiber leaving ACTIVE). Plugin reload/HMR unloads just this fiber,
+  // so the root stays ACTIVE and no spurious "DSH exited" is sent.
+  ctx.effect(() => () => {
+    if (!config.goodbye.enabled) return
+    if (ctx.root.fiber.state === FIBER_STATE_ACTIVE) return
+    try {
+      return transport.send({
+        text: renderTemplate(config.goodbye.template, {
+          time: new Date().toTimeString().slice(0, 8),
+        }),
+        idempotencyKey: makeIdempotencyKey(['goodbye', String(process.pid)]),
+      }).then(() => undefined, (error: unknown) => {
+        logger.warn('[dsh-lark-notify] goodbye send failed (contained)', error)
+      })
+    } catch (error) {
+      logger.warn('[dsh-lark-notify] goodbye preparation failed (contained)', error)
+    }
+  })
+
+  // Process-death watchdog heartbeat: an external supervisor
+  // (scripts/lark-watchdog.mjs) alerts when the file stops updating.
+  if (config.watchdog.enabled) {
+    const heartbeatFile = config.watchdog.heartbeatFile.trim()
+    if (heartbeatFile === '') {
+      logger.warn('[dsh-lark-notify] watchdog enabled but heartbeatFile is empty — heartbeat disabled')
+    } else {
+      let warned = false
+      const touch = (): void => {
+        writeFile(heartbeatFile, String(Date.now())).catch((error: unknown) => {
+          if (warned) return
+          warned = true
+          logger.warn(`[dsh-lark-notify] heartbeat write to ${heartbeatFile} failed (contained)`, error)
+        })
+      }
+      touch()
+      ctx.interval(touch, config.watchdog.intervalMs)
+    }
+  }
 
   const setup = new SetupController({
     bin: config.bin,
@@ -88,7 +151,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
     onCaptured: async (message) => {
       await userSettings.scope?.update({ chatId: message.chatId, userId: message.senderId })
       await transport.send({
-        text: '✅ dsh-lark-bridge 配置成功！之后 DSH 会话停顿时（权限申请/提问/出错）会在这里提醒你。',
+        text: '✅ dsh-lark-bridge 配置成功！之后 DSH 会话停顿时（权限申请/提问/出错/完成/阻塞/重试/停滞）会在这里提醒你。',
         idempotencyKey: makeIdempotencyKey(['setup', message.chatId, String(Date.now())]),
         target: { chatId: message.chatId, userId: '' },
       })

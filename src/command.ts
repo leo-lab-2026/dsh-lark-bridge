@@ -78,6 +78,11 @@ async function runStatus(deps: DebugCommandDeps): Promise<{ kind: 'success'; tex
   const target = transport.currentTarget()
   const auth = await checkLarkAuth(config.bin, AUTH_CHECK_TIMEOUT_MS, logger)
   const stats = notifier.status()
+  const enabledCategories = [
+    'permission', 'question', 'error',
+    'complete', 'stop:blocked', 'stop:max-tokens', 'stop:aborted', 'stop:interrupted',
+    'retry', 'stall',
+  ].filter(id => engine.enabled(id))
 
   const lines = [
     `目标: ${target.chatId !== undefined && target.chatId !== '' ? `chat ${target.chatId}` : target.userId !== undefined && target.userId !== '' ? `user ${target.userId}` : '(未配置)'}`,
@@ -87,7 +92,8 @@ async function runStatus(deps: DebugCommandDeps): Promise<{ kind: 'success'; tex
     `发送统计: ${stats.sent} 成功 / ${stats.failed} 失败`,
     stats.lastError !== undefined ? `最近错误: ${stats.lastError}` : '',
     `setup: ${describeSetup(setup.status())}`,
-    `grace 中待发: ${engine.pendingCount()} | 已缓存标题会话: ${engine.watchedSessionCount()}`,
+    `通知类别: ${enabledCategories.join(', ')}`,
+    `grace 中待发: ${engine.pendingCount()} | idle 宽限中: ${engine.idleWaitCount()} | 已跟踪会话: ${engine.trackedSessionCount()} | 已缓存标题会话: ${engine.watchedSessionCount()}`,
   ].filter(line => line !== '')
 
   const hints: string[] = []
